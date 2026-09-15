@@ -98,6 +98,25 @@
 
 配套工作流在 `workflows/` 里，直接在 ComfyUI 里「打开」即可。
 
+### 内置的模型文件名
+
+前端提交用的节点图（连带下面四个模型文件名）是**写死在 `web/h3ui.html` 里**的，界面上没有修改入口：
+
+```
+unet_name  : minimax_h3_fl2va_pruned_int8_convrot.safetensors
+clip_name  : qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors
+vae_name   : minimax_h3_video_vae_fp16.safetensors   ← 视频 VAE
+vae_name   : minimax_h3_audio_vae_fp32.safetensors   ← 音频 VAE
+```
+
+文件名不一样就搜这四个键（`unet_name` / `clip_name` / `vae_name`）改掉 —— **只改引号里的值，键名别动**。
+改错了也不用猜：生成失败的报错会直接点出**哪个节点、哪个字段、以及可选值有哪些**，例如：
+
+```
+错误：Prompt outputs failed validation —— 节点 10（UNETLoader）：
+      unet_name: '你的模型.safetensors' not in ['minimax_h3_fl2va_pruned_int8_convrot.safetensors'] —— Value not in list
+```
+
 ---
 
 ## 关于抠图
@@ -156,6 +175,8 @@
 | Eagle 里的名字不是我要的 | 名字来自第 4 列页脚的「**序列帧名称**」+ 四位序号；它右边就是实时预览 |
 | 导出的图是黑底、不透明 | 说明没点过「应用抠图」＝没抠图。导出按钮的悬浮提示会写明这次带不带透明 |
 | 想只导出画面里的一块 | 先用第 8 步的裁剪；导出的**尺寸就是框的像素尺寸** |
+| 生成时报 `Value not in list: unet_name ...` | 你的模型文件名和内置的不一致 —— **报错里会列出可选值**，照它改（见上面「内置的模型文件名」） |
+| 任务记录看不全 | 日志区可以滚（内容超出时用滚轮），面板本身不会折叠 |
 
 ---
 

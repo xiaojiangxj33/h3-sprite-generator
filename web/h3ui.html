@@ -6229,21 +6229,37 @@
 
 
     /* ============================================================
-       __LOG_PANEL_FIXED__ 任务记录常开（2026-09-15 用户要求）
-         · 去掉右上角那个「+ / −」标记 —— 它暗示"能关掉"，但这个面板本该一直开着
-         · 折叠行为由下面的 JS 禁掉（preventDefault summary 的 click）
-       特异性说明：各皮肤都有 `:root[data-skin="X"] .log-panel[open] summary::after`（0,4,2），
-       下面这条写成 :root:root 后同样是 (0,4,2) —— 持平，靠"在样式表最后"取胜，
-       **所以这段必须留在末尾，别挪到中间**。
+       __LOG_SCROLL_FIX__ 「任务记录」常开 + 日志区可滚（2026-09-15，用户要求/反馈）
+       面板已由 <details> 改成 <section>（见 HTML 里 __LOG_PANEL_SECTION__ 的完整说明）。
+       为什么必须改结构、而不是只调 CSS：<details> 的内容被包在 UA 影子树的插槽里，
+       `.panel-body` 并不是 details 的 flex item —— 实测即使给它 flex:1 1 0 / min-height:0，
+       它仍被内容撑到 1632px（面板只有 725px），#log 的 height:100% 因此失去约束、自己不溢出，
+       真正溢出的是面板（overflow:hidden）→ 内容被裁掉且没有滚动条，滚轮只会滚整页。
+       换成普通 section 后，这条高度链才是真的：
+         .log-panel(flex column) → .panel-body(flex:1 1 0) → #log(height:100%; overflow-y:auto)
        ============================================================ */
 
-    :root:root .log-panel summary::after,
-    :root:root .log-panel[open] summary::after {
-      content: none;
+    :root:root .app-grid > .left-col > .log-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;              /* 允许它在左列里被压缩，而不是被内容顶大 */
     }
 
-    :root:root .log-panel > .panel-header {
-      cursor: default;
+    :root:root .app-grid > .left-col > .log-panel > .panel-header {
+      flex: 0 0 auto;             /* 标题固定高度，不参与伸缩 */
+      cursor: default;            /* 不能折叠，就别暗示可以点 */
+    }
+
+    :root:root .app-grid > .left-col > .log-panel > .panel-body {
+      flex: 1 1 0;                /* 按"可用空间"分配，而不是按内容高度 */
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    :root:root .app-grid > .left-col > .log-panel #log {
+      height: 100%;
+      max-height: 100%;
+      overflow-y: auto;           /* 现在 #log 自己会溢出 → 滚动条归它 */
     }
 
 
@@ -6320,16 +6336,21 @@
           </div>
         </details>
       </section>
-        <!-- __LOG_PANEL_OPEN__ 原来这里少了 open：左列的 flex 会把这个面板撑成半列高（约 800px），
-             但 <details> 折叠时内容不参与绘制 → 左下角就是一个大空盒子，用户看不到任何任务反馈。
-             CSS 早就给 .log-panel > .panel-body 和 #log 写好了"撑满 + overflow-y: auto"，
-             显然本意就是默认展开。加上 open 即恢复本意。 -->
-        <details class="panel log-panel" open>
-          <summary class="panel-header">任务记录</summary>
+        <!-- __LOG_PANEL_SECTION__ 这个面板原来是 <details open> + <summary>（可折叠）。
+             2026-09-15 用户要求「常开、不要关闭按钮」，折叠能力于是被彻底去掉 ——
+             直接用 <section> + <div class="panel-header">，结构上就不可能再折起来。
+             顺带解决了"日志不能滚"（用户随后反馈）：<details> 的内容被包在 **UA 影子树的插槽**里，
+             所以挂在 .panel-body 上的 flex 全是死的（实测 flex-basis:0 也压不住，它被内容撑到 1632px，
+             而面板只有 725px），#log 的 height:100% 因此失去约束 → 真正溢出的是面板，
+             它 overflow:hidden → 内容被裁掉且没有滚动条。换成普通 section 后整条高度链才成立。
+             注：各皮肤里那几条 `.log-panel summary::after` / `summary { list-style }` 现在选择不到
+             任何元素（不再有 summary），是无害的惰性规则，未清理。 -->
+        <section class="panel log-panel">
+          <div class="panel-header">任务记录</div>
           <div class="panel-body">
             <div id="log">界面已准备就绪。</div>
           </div>
-      </details>
+        </section>
       </div>
 
       <section class="panel">
@@ -7230,6 +7251,34 @@
         return out;
       }
 
+      /* __ERROR_DETAIL__ 把 ComfyUI 的**节点级**错误也带出来。
+         原来只抛 body.error，用户看到的就是一句「Prompt outputs failed validation」，
+         完全看不出是哪个节点的哪个输入不对 —— 实测"模型文件名不在列表里"这种最需要自救的
+         情况，能说明问题的信息恰恰只在 node_errors 里。 */
+      function friendlyComfyError(body, response) {
+        const err = body && body.error;
+        if (!err) {
+          return (body && body.message) || (response.status + " " + response.statusText);
+        }
+        const parts = [];
+        parts.push(err.message || err.type || "请求失败");
+        if (typeof err.details === "string" && err.details) { parts.push(err.details); }
+        const nodeErrors = (body && body.node_errors) || {};
+        const lines = [];
+        for (const nodeId of Object.keys(nodeErrors)) {
+          const info = nodeErrors[nodeId] || {};
+          const list = Array.isArray(info.errors) ? info.errors : [];
+          for (const item of list) {
+            const text = [item.details, item.message].filter(Boolean).join(" —— ") || JSON.stringify(item);
+            lines.push("节点 " + nodeId + (info.class_type ? "（" + info.class_type + "）" : "") + "：" + text);
+            if (lines.length >= 4) { break; }
+          }
+          if (lines.length >= 4) { break; }
+        }
+        if (lines.length) { parts.push(lines.join("；")); }
+        return parts.join(" —— ");
+      }
+
       async function jsonRequest(url, options) {
         const response = await fetch(url, options);
         let body = null;
@@ -7239,10 +7288,7 @@
           body = null;
         }
         if (!response.ok) {
-          const detail = body && (body.error || body.message)
-            ? JSON.stringify(body.error || body.message)
-            : `${response.status} ${response.statusText}`;
-          throw new Error(detail);
+          throw new Error(friendlyComfyError(body, response));   // __ERROR_DETAIL__
         }
         return body;
       }
@@ -8933,18 +8979,8 @@
       els.runButton.addEventListener("click", runGeneration);
       els.sendEagleButton.addEventListener("click", sendIntervalFramesToEagle);   // __EAGLE_DIRECT__
       els.resetButton.addEventListener("click", resetSettings);
-      /* __LOG_PANEL_FIXED__ 任务记录常开：点标题不再折叠。
-         <summary> 的 Enter / Space 在 Chrome 里也会派发 click，所以拦 click 就覆盖了键鼠两条路。
-         同时把 open 再置一次，防止以后有什么代码把它关掉。 */
-      (() => {
-        const panel = document.querySelector(".log-panel");
-        if (!panel) { return; }
-        panel.open = true;
-        const header = panel.querySelector("summary");
-        if (header) {
-          header.addEventListener("click", (event) => { event.preventDefault(); });
-        }
-      })();
+      /* 任务记录面板不再需要"禁掉折叠"的守卫了：它现在是 <section>，结构上就没有折叠能力
+         （原来是 <details>，那段 preventDefault 守卫随 __LOG_PANEL_SECTION__ 一起删掉了）。 */
       els.downloadButton.addEventListener("click", () => {
         if (!outputUrl) return;
         const link = document.createElement("a");
