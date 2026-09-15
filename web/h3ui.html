@@ -6156,6 +6156,78 @@
       outline-offset: 2px;
     }
 
+    /* ============================================================
+       __CROP_EXPORT__ 裁剪导出（2026-09-15，用户要求）
+       覆盖层由 JS 动态创建（和缩放徽标一样），不动 HTML 骨架。
+       配色刻意照抄 .preview-zoom-badge 的 --ink on --surface —— 那一对已经过 8 组合
+       对比度实测（10.01–20.17），照抄就不会重新引入对比度问题。
+       ============================================================ */
+
+    :root:root .crop-layer {
+      position: absolute;
+      z-index: 2;
+      overflow: hidden;              /* 把选框外的压暗裁掉，只靠一个元素做出"只亮框内" */
+      pointer-events: none;          /* 平时不吃事件：滚轮缩放、拖动平移照旧 */
+      border-radius: var(--r-md);
+    }
+
+    :root:root .preview-stage.cropping .crop-layer {
+      pointer-events: auto;          /* 只在裁剪模式下接管指针 */
+      cursor: crosshair;
+    }
+
+    :root:root .crop-layer[hidden],
+    :root:root .crop-marquee[hidden],
+    :root:root .crop-badge[hidden] {
+      display: none;
+    }
+
+    :root:root .crop-marquee {
+      position: absolute;
+      box-sizing: border-box;
+      border: 1px dashed var(--accent);
+      pointer-events: none;
+    }
+
+    :root:root .preview-stage.cropping .crop-marquee {
+      border-style: solid;
+      /* 框外压暗：超大 spread 的 box-shadow，被 .crop-layer 的 overflow 裁掉 */
+      box-shadow: 0 0 0 9999px rgba(8, 10, 14, .55);
+    }
+
+    /* 左上 / 右下角的小标记，让"这块会被导出"更明确 */
+    :root:root .crop-marquee::before,
+    :root:root .crop-marquee::after {
+      content: "";
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--accent);
+    }
+
+    :root:root .crop-marquee::before { left: -1px; top: -1px; border-right: 0; border-bottom: 0; }
+    :root:root .crop-marquee::after { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
+
+    :root:root .crop-badge {
+      position: absolute;
+      left: 10px;                    /* 放左下：右下已经被缩放徽标占住 */
+      bottom: 10px;
+      z-index: 3;                    /* 必须高于 .crop-layer(2)，否则点不到 */
+      min-height: 26px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: var(--r-pill);
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: var(--nm-sm);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      cursor: pointer;
+    }
+
+
   </style>
 </head>
 <body>
@@ -6637,11 +6709,14 @@
               <div class="preview-meta" id="previewMeta">挑选后可预览当前序列。</div>
               <div class="preview-controls">
                 <button class="button" id="previousFrameButton" type="button" disabled title="上一帧">◀</button>
-                <button class="button primary" id="playSequenceButton" type="button" disabled title="播放">▶ 播放</button>
-                <button class="button" id="pauseSequenceButton" type="button" disabled title="暂停">Ⅱ</button>
+                <!-- __PLAY_TOGGLE__ 播放键自己切换播放/暂停（用户要求去掉单独的「Ⅱ 暂停」）。
+                     点击接到已存在的 toggleSequencePreview()，与空格键共用同一份实现。 -->
+                <button class="button primary" id="playSequenceButton" type="button" disabled title="播放 / 暂停">▶ 播放</button>
                 <button class="button" id="nextFrameButton" type="button" disabled title="下一帧">▶</button>
                 <!-- __MASK_BTN_IN_PREVIEW__ 放这里：确认抠图效果时眼睛就在上面那张预览上 -->
                 <button class="button" id="applyMaskButton" type="button" disabled title="确认当前抠图参数（预览已即时生效）">✦ 应用抠图</button>
+                <!-- __CROP_EXPORT__ 裁剪按钮挨着「应用抠图」（用户要求）：点它，再在预览上拖一个框 -->
+                <button class="button" id="cropButton" type="button" disabled title="在预览上拖出一个框，导出 PNG 时只导出框内区域">⬚ 裁剪</button>
               </div>
               <label class="preview-fps">
                 <span>预览帧率</span>
@@ -6697,12 +6772,12 @@
       const SAMPLER_NODE_ID = "42";
       const SEED_NODE_ID = "41";
       const OUTPUT_VIDEO_NODE_ID = "60";
-      const EAGLE_SELECTOR_NODE_ID = "61";
-      const EAGLE_NODE_ID = "62";
-      // 用户工作流里的抠图节点（custom_nodes/ComfyUI-H3-ImageKey）。
-      // 前端此前直接 [选帧] -> [Eagle]，把抠图整个跳过了 → 导出的 PNG 没有透明背景。
-      // 现在按用户工作流的顺序接上：选帧 → H3ImageKey → D2 Send Eagle。
-      const EAGLE_KEY_NODE_ID = "63";
+      /* __EAGLE_DIRECT__ 这里原来有三个节点 id（61 选帧 / 62 D2 Send Eagle / 63 H3ImageKey）：
+         发 Eagle 走的是"把它们拼进提交体交给 ComfyUI 执行"。2026-09-15 用户要求改成
+         前端直接投给 Eagle 的本地 API，于是这三个常量连同 createEaglePrompt() 一起删了。
+         前端本来就有与 H3ImageKey 逐像素一致的抠图实现（512×512×4 通道 0 差异），
+         所以这条路上不再需要 D2 Send Eagle 与 H3ImageKey 两个节点。 */
+      const EAGLE_API = "http://127.0.0.1:41595";
       const SETTINGS_STORAGE_KEY = "minimax-h3-bridge-settings";
       const HISTORY_STORAGE_KEY = "minimax-h3-bridge-history";
       const HISTORY_LIMIT = 20;
@@ -6916,7 +6991,6 @@
         previewMeta: document.getElementById("previewMeta"),
         previousFrameButton: document.getElementById("previousFrameButton"),
         playSequenceButton: document.getElementById("playSequenceButton"),
-        pauseSequenceButton: document.getElementById("pauseSequenceButton"),
         nextFrameButton: document.getElementById("nextFrameButton"),
         previewFps: document.getElementById("previewFps"),
         sequenceLoop: document.getElementById("sequenceLoop"),
@@ -6948,6 +7022,7 @@
         maskEdgeShiftValue: document.getElementById("maskEdgeShiftValue"),
         maskInvert: document.getElementById("maskInvert"),
         applyMaskButton: document.getElementById("applyMaskButton"),
+        cropButton: document.getElementById("cropButton"),   // __CROP_EXPORT__
         maskResetButton: document.getElementById("maskResetButton"),
         sendSelectedEagleButton: document.getElementById("sendSelectedEagleButton"),
         resetButton: document.getElementById("resetButton"),
@@ -7106,81 +7181,30 @@
         return { prompt, seed };
       }
 
-      function createEaglePrompt() {
-        if (!lastSubmittedPrompt) {
-          throw new Error("还没有可发送到 Eagle 的生成结果");
+      /* 逐帧产出最终 PNG（抠图 + 裁剪）。**「导出 PNG ZIP」与「发送到 Eagle」共用这一份** ——
+         两处各写一遍迟早走偏（本项目有过"预览抠了、导出没抠"的先例，见 AGENTS 6.9.1）。
+         返回 [{name, blob}]，name 不含扩展名（Eagle 自己会补 .png）。 */
+      async function buildOutputFrames(frames) {
+        const keyed = maskActive();
+        const crop = getCropRect();
+        const base = getFrameBaseName();
+        const out = [];
+        for (let index = 0; index < frames.length; index += 1) {
+          const frame = frames[index];
+          let blob;
+          if (keyed) {
+            const source = await getKeyedCanvas(frame, keying.params);
+            blob = await canvasToPngBlob(crop ? cropToCanvas(source, crop) : source);
+          } else if (crop) {
+            /* 没抠图时 frame.blob 是拆分出来的原图：不裁剪就直接用它（字节不变），
+               要裁剪才画到 canvas 上再取 —— frame.bitmap 来自同源 blob，不会污染 canvas。 */
+            blob = await canvasToPngBlob(cropToCanvas(frame.bitmap, crop));
+          } else {
+            blob = frame.blob;
+          }
+          out.push({ name: base + "_" + String(index + 1).padStart(4, "0"), blob: blob });
         }
-
-        const prompt = JSON.parse(JSON.stringify(lastSubmittedPrompt));
-        const interval = Math.max(1, Math.floor(getNumber(els.eagleInterval, 2)));
-        const skip = Math.max(0, Math.floor(getNumber(els.eagleSkip, 0)));
-        const compression = Math.max(1, Math.min(100, Math.floor(getNumber(els.eagleCompression, 90))));
-        const selectedFrameIndexes = getSelectedFrameIndexes();
-        const filenameTemplate = selectedFrameIndexes.length
-          ? getEagleFilenameTemplate()
-          : (els.eagleFilename.value.trim() || "fire_{seed}");
-
-        if (selectedFrameIndexes.length) {
-          prompt[EAGLE_SELECTOR_NODE_ID] = {
-            "inputs": {
-              "image": ["50", 0],
-              "indexes": selectedFrameIndexes.join(", "),
-              "err_if_missing": true,
-              "err_if_empty": true
-            },
-            "class_type": "VHS_SelectImages",
-            "_meta": { "title": "选择图像（手动挑帧）" }
-          };
-        } else {
-          prompt[EAGLE_SELECTOR_NODE_ID] = {
-            "inputs": {
-              "images": ["50", 0],
-              "select_every_nth": interval,
-              "skip_first_images": skip
-            },
-            "class_type": "VHS_SelectEveryNthImage",
-            "_meta": { "title": "选择图像（间隔）" }
-          };
-        }
-        // ① 先抠图：参数直接取界面控件（与预览用的是同一份 readMaskParams()）
-        const maskParams = readMaskParams();
-        prompt[EAGLE_KEY_NODE_ID] = {
-          "inputs": {
-            "image": [EAGLE_SELECTOR_NODE_ID, 0],
-            "mode": maskParams.mode,
-            "screen_strength": maskParams.screenStrength,
-            "alpha_source": maskParams.alphaSource,
-            "alpha_gain": maskParams.alphaGain,
-            "alpha_gamma": maskParams.alphaGamma,
-            "key_color": maskParams.keyColor,
-            "tolerance": maskParams.tolerance,
-            "feather": maskParams.feather,
-            "decontam_strength": maskParams.decontamStrength,
-            "distance": maskParams.distance,
-            "pre_blur": maskParams.preBlur,
-            "edge_shift": maskParams.edgeShift,
-            "invert": maskParams.invert,
-            "key_color_hex": ""
-          },
-          "class_type": "H3ImageKey",
-          "_meta": { "title": "H3 抠图 · 滤色 / 色键" }
-        };
-        prompt[EAGLE_NODE_ID] = {
-          "inputs": {
-            "images": [EAGLE_KEY_NODE_ID, 0],
-            "format": els.eagleFormat.value,
-            "lossless_webp": els.eagleLossless.checked,
-            "compression": compression,
-            "save_tags": els.eagleTags.value,
-            "filename_template": filenameTemplate,
-            "eagle_folder": els.eagleFolder.value.trim(),
-            "preview": els.eaglePreview.checked,
-            "positive": ["5", 0]
-          },
-          "class_type": "D2 Send Eagle",
-          "_meta": { "title": "D2 Send Eagle" }
-        };
-        return prompt;
+        return out;
       }
 
       async function jsonRequest(url, options) {
@@ -7523,7 +7547,8 @@
         els.videoEmpty.classList.add("hidden");
         els.outputFile.textContent = record.outputName || "历史视频";
         els.downloadButton.disabled = false;
-        els.sendEagleButton.disabled = !lastSubmittedPrompt;
+        // __EAGLE_DIRECT__ 不再按"有没有生成结果"开 Eagle 按钮：直连要求先拆分，
+        // 由下面的 clearSequence → updateSequenceStatus 统一决定。
         setSequenceInputsEnabled(true);
         clearSequence(true);
         setProgress(100, "已恢复历史视频");
@@ -7599,6 +7624,7 @@
         sequenceDirection = 1;
         sequenceAnchorIndex = -1;   // __EAGLE_LIKE__
         resetPreviewZoom();         // __EAGLE_LIKE__
+        resetCropExport();          // __CROP_EXPORT__ 换了视频，旧裁剪框没有意义
         renderSequenceGrid();
         updateSequenceStatus();
         setSequenceInputsEnabled(allowSplit);
@@ -7631,13 +7657,27 @@
         });
         // 三段式门控：必须先在「抠图」模块点过「应用抠图」，才允许发送到 Eagle
         els.applyMaskButton.disabled = !hasKept;
-        els.sendSelectedEagleButton.disabled = !hasKept || isRunning || !maskActive();
+        updateCropButton();   // __CROP_EXPORT__
+        /* __EAGLE_DIRECT__ 两个 Eagle 按钮都要求"有帧 + 已确认抠图"：
+           直连发送用的是界面里这些帧（不再是让 ComfyUI 从视频重新抽帧），所以必须先拆分。 */
+        const eagleReady = hasKept && maskActive();
+        [els.sendSelectedEagleButton, els.sendEagleButton].forEach((button) => {
+          button.disabled = !eagleReady || isRunning;
+        });
+        const eagleHint = !hasKept
+          ? "请先点「开始拆分」拆出序列帧"
+          : "请先在抠图模块点「✦ 应用抠图」并确认效果";
         els.sendSelectedEagleButton.title = maskActive()
-          ? "发送抠好的帧到 Eagle"
-          : "请先在下方「抠图」模块点「应用抠图」并确认效果";
-        els.exportFramesButton.title = maskActive()
+          ? "把选中的保留帧发送到 Eagle（直连 Eagle API，不经 ComfyUI 节点）"
+          : eagleHint;
+        els.sendEagleButton.title = maskActive()
+          ? "按「每 " + Math.max(1, Math.floor(getNumber(els.eagleInterval, 2))) + " 帧取 1」发送到 Eagle"
+          : eagleHint;
+        const cropTip = getCropRect();   // __CROP_EXPORT__
+        els.exportFramesButton.title = (maskActive()
           ? "导出已抠图的 PNG（透明背景）"
-          : "导出原始 PNG（未抠图，不透明）";
+          : "导出原始 PNG（未抠图，不透明）")
+          + (cropTip ? `，并裁剪为 ${cropTip.w}×${cropTip.h}` : "");
         if (!hasKept) {
           stopSequencePreview();
           clearSequenceCanvas();
@@ -7645,11 +7685,11 @@
           sequencePreviewIndex = Math.max(0, Math.min(sequencePreviewIndex, kept.length - 1));
           drawSequencePreview();
         }
-        /* __EAGLE_LIKE__ 播放/暂停的状态在这里统一落盘：
+        /* __EAGLE_LIKE__ 播放状态在这里统一落盘：
            下面这个 if 里可能刚 stopSequencePreview()，所以必须放在它【之后】算，
-           否则"帧全被剔除时自动停播"会让暂停按钮留在可点状态。 */
-        els.pauseSequenceButton.disabled = !sequencePlayTimer;
-        els.playSequenceButton.textContent = sequencePlayTimer ? "⏸ 播放中" : "▶ 播放";
+           否则"帧全被剔除时自动停播"会让播放键留着"暂停"的旧文案。
+           文案就两个词：播放 / 暂停（用户 2026-09-15 明确要求，不要"播放中"）。 */
+        els.playSequenceButton.textContent = sequencePlayTimer ? "⏸ 暂停" : "▶ 播放";
       }
 
       function clearSequenceCanvas() {
@@ -8030,6 +8070,7 @@
         const frame = kept[sequencePreviewIndex];
         if (!frame) {
           clearSequenceCanvas();
+          syncCropLayer();   // __CROP_EXPORT__ canvas 变回 1×1，覆盖层要收起
           return;
         }
         markPreviewingFrame(frame);   // __EAGLE_LIKE2__
@@ -8055,6 +8096,7 @@
           context.drawImage(frame.bitmap, 0, 0);
           els.previewMeta.textContent = `预览 ${sequencePreviewIndex + 1}/${kept.length}，原始帧 #${frame.sourceIndex}`;
         }
+        syncCropLayer();   // __CROP_EXPORT__ 帧尺寸可能变了，覆盖层几何要重算
       }
 
       function stepSequencePreview(offset) {
@@ -8355,30 +8397,55 @@
         els.exportFramesButton.disabled = true;
         try {
           const prefix = getFrameBaseName();
+          const zipName = `${prefix}_selected_frames.zip`;
+          /* __SAVE_AS__ 让用户自己选保存位置（原来 link.download 是静默丢进默认下载目录，用户找不到）。
+             顺序很关键：**先弹「另存为」，再打包**。showSaveFilePicker 要求调用时仍在"用户手势"
+             有效期内，而抠图 + 打包几十帧要几百毫秒到几秒，等打包完再弹会超出手势有效期 →
+             SecurityError: Must be handling a user gesture —— 那个错还会被当成"导出失败"，极易误判。
+             用户点取消是 AbortError，属正常操作，不能报错。 */
+          let saveHandle = null;
+          if (typeof window.showSaveFilePicker === "function") {
+            try {
+              saveHandle = await window.showSaveFilePicker({
+                suggestedName: zipName,
+                types: [{ description: "ZIP 压缩包", accept: { "application/zip": [".zip"] } }]
+              });
+            } catch (pickerError) {
+              if (pickerError && pickerError.name === "AbortError") {
+                log("已取消保存。");
+                return;
+              }
+              log(`打不开「另存为」窗口，改用浏览器默认下载目录：${pickerError && pickerError.message}`);
+              saveHandle = null;
+            }
+          }
           /* __EXPORT_KEYED__ 抠图判据与预览、与发 Eagle 完全一致（maskActive()）：
                预览抠了 → 导出的就得抠；没碰过抠图模块（confirmed=false）→ 保持原样导原始帧。
              逐帧走 getKeyedCanvas，它按【参数哈希】缓存，重复导出同一帧不会重算。 */
           const keyed = maskActive();
-          const files = [];
-          for (let index = 0; index < kept.length; index += 1) {
-            const frame = kept[index];
-            files.push({
-              name: getFrameName(index + 1, "png"),
-              blob: keyed
-                ? await canvasToPngBlob(await getKeyedCanvas(frame, keying.params))
-                : frame.blob
-            });
-          }
+          const crop = getCropRect();   // __CROP_EXPORT__ 整帧裁剪会被归一成 null
+          /* 出图（抠图 + 裁剪）与「发送到 Eagle」共用 buildOutputFrames —— 见 __EAGLE_DIRECT__。
+             ZIP 里的文件名要带扩展名，所以这里补 .png。 */
+          const files = (await buildOutputFrames(kept))
+            .map((item) => ({ name: item.name + ".png", blob: item.blob }));
           const zip = await createZip(files);
-          const url = URL.createObjectURL(zip);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = `${prefix}_selected_frames.zip`;
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          URL.revokeObjectURL(url);
-          log(`已导出 ${kept.length} 张 PNG 序列帧（${keyed ? "已应用抠图，透明背景" : "未抠图，不透明"}），命名为 ${prefix}_0001 起。`);
+          const summary = `${kept.length} 张 PNG 序列帧（${keyed ? "已应用抠图，透明背景" : "未抠图，不透明"}${crop ? `，已裁剪 ${crop.w}×${crop.h}` : ""}），命名为 ${prefix}_0001 起`;
+          if (saveHandle) {
+            const writable = await saveHandle.createWritable();
+            await writable.write(zip);
+            await writable.close();
+            log(`已保存 ${summary} → ${saveHandle.name}`);
+          } else {
+            const url = URL.createObjectURL(zip);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = zipName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            log(`已导出 ${summary}。`);
+          }
         } catch (error) {
           log(`导出错误：${error.message}`);
         } finally {
@@ -8455,7 +8522,7 @@
           els.videoEmpty.classList.add("hidden");
           els.outputFile.textContent = videoItem.filename;
           els.downloadButton.disabled = false;
-          els.sendEagleButton.disabled = false;
+          // __EAGLE_DIRECT__ 生成完还没有帧，Eagle 按钮保持禁用；拆完帧后 updateSequenceStatus 会开它。
           setSequenceInputsEnabled(true);
           setSequenceState("", "可拆分");
           setProgress(100, "生成完成");
@@ -8479,62 +8546,204 @@
         }
       }
 
-      async function sendToEagle() {
-        if (isRunning) {
-          return;
-        }
-        if (!lastSubmittedPrompt || !outputUrl) {
-          log("请先生成并确认一个视频。");
-          return;
-        }
+      /* ============================================================
+         __EAGLE_DIRECT__ 直接发送到 Eagle（2026-09-15，用户要求绕过 ComfyUI 节点）
+         原路是"拼 #61 选帧 → #63 H3ImageKey → #62 D2 Send Eagle 交 ComfyUI 跑"；
+         现在前端自己出图（抠图 + 裁剪都在 JS 里做完），直接投给 Eagle 的本地 API。
 
+         下面每条都是**本机实测**出来的，别凭直觉改：
+         * Eagle API 在 http://127.0.0.1:41595（Eagle → 偏好设置 → 开发者 里能看到端口）。
+         * Eagle 对 OPTIONS 预检返回 **405 且不带 CORS 头** → 浏览器一旦用 application/json
+           就会卡在预检。实测 **text/plain 一样能被正确解析**，且不触发预检。
+         * addFromURL 只接受**Eagle 自己能下载的 http 地址**：实测 data: URL 会静默失败
+           （返回 success 但什么都不建），所以下面每一张都先自己探一次 /view。
+         * 上传走同源 ComfyUI 的 /upload/image（type=temp；它原样写字节、不重编码）。
+         * addFromURL 是"提交即返回"，不会回报告诉我们下载成败 —— 这是 Eagle 的设计，
+           所以日志只如实说"提交成功 N 张"，不谎称"已入库 N 张"。
+         * 条目名字完全由 name 决定（Eagle 自己补 .png），实测**没有时间戳前缀**。
+         ============================================================ */
+
+      async function eaglePost(path, payload) {
+        let response;
+        try {
+          response = await fetch(EAGLE_API + path, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=UTF-8" },
+            body: JSON.stringify(payload)
+          });
+        } catch (error) {
+          throw new Error("连不上 Eagle（" + EAGLE_API + "）");
+        }
+        let body = null;
+        try { body = await response.json(); } catch (error) { body = null; }
+        if (!response.ok) {
+          throw new Error((body && body.message) || (response.status + " " + response.statusText));
+        }
+        return body;
+      }
+
+      async function eagleGet(path) {
+        let response;
+        try {
+          response = await fetch(EAGLE_API + path, { cache: "no-store" });
+        } catch (error) {
+          throw new Error("连不上 Eagle（" + EAGLE_API + "）");
+        }
+        if (!response.ok) { throw new Error(response.status + " " + response.statusText); }
+        return response.json();
+      }
+
+      function eagleFindFolder(nodes, wanted) {
+        if (!Array.isArray(nodes)) { return ""; }
+        for (const node of nodes) {
+          if (node && node.name === wanted) { return node.id; }
+          const deeper = eagleFindFolder(node && node.children, wanted);
+          if (deeper) { return deeper; }
+        }
+        return "";
+      }
+
+      /* 按名字找文件夹（含子文件夹）；找不到就新建 —— 对应界面上那格「文件夹」 */
+      async function resolveEagleFolderId(name) {
+        const wanted = (name || "").trim();
+        if (!wanted) { return ""; }
+        const listed = await eagleGet("/api/folder/list");
+        const found = eagleFindFolder(listed && listed.data, wanted);
+        if (found) { return found; }
+        const created = await eaglePost("/api/folder/create", { folderName: wanted });
+        return (created && created.data && created.data.id) || "";
+      }
+
+      /* 标签：对应界面上那格「标签」。模型名从提交体里找 unet_name ——
+         不再经过节点，所以拿不到 ComfyUI 端兜底的名字，找不到就只给提示词标签。 */
+      function eagleTagList() {
+        const mode = els.eagleTags ? els.eagleTags.value : "None";
+        if (!mode || mode === "None") { return []; }
+        const promptTags = (els.promptText.value || "")
+          .replace(/:[0-9.]+/g, "")
+          .split(",")
+          .map((piece) => piece.replace(/[()]/g, "").trim())
+          .filter((piece) => piece);
+        let model = "";
+        const graph = lastSubmittedPrompt || {};
+        for (const key of Object.keys(graph)) {
+          const inputs = graph[key] && graph[key].inputs;
+          if (inputs && typeof inputs.unet_name === "string") { model = inputs.unet_name; break; }
+        }
+        if (mode === "Prompt") { return promptTags; }
+        if (mode === "Checkpoint") { return model ? [model] : []; }
+        return model ? promptTags.concat([model]) : promptTags;
+      }
+
+      /* 一张帧交给 Eagle：先放到同源 ComfyUI 上拿个"Eagle 抓得动"的地址，再让 Eagle 去抓 */
+      async function eagleSendOne(blob, itemName, folderId, tags) {
+        const form = new FormData();
+        form.append("image", blob, itemName + ".png");   // 这个名字只影响 ComfyUI 那边的临时文件
+        form.append("type", "temp");
+        form.append("overwrite", "true");
+        const uploaded = await jsonRequest(COMFY_URL + "/upload/image", { method: "POST", body: form });
+        if (!uploaded || !uploaded.name) { throw new Error("上传到 ComfyUI 失败"); }
+        let viewUrl = COMFY_URL + "/view?filename=" + encodeURIComponent(uploaded.name)
+          + "&type=" + encodeURIComponent(uploaded.type || "temp");
+        if (uploaded.subfolder) { viewUrl += "&subfolder=" + encodeURIComponent(uploaded.subfolder); }
+        /* 自检：Eagle 是"提交即成功"，不会回报告诉我们它下载失败 —— 自己先确认这个地址取得到。
+           （实测过：地址取不到时 Eagle 照样回 success，然后静默什么都不建。） */
+        const probe = await fetch(viewUrl, { cache: "no-store" });
+        if (!probe.ok) { throw new Error("ComfyUI 提供不了临时图（" + probe.status + "）"); }
+        await eaglePost("/api/item/addFromURL", {
+          url: viewUrl, name: itemName, tags: tags, folderId: folderId
+        });
+      }
+
+      /* frames: [{name, blob}]，抠图与裁剪已在 buildOutputFrames 里做完 */
+      async function eagleSendFrames(frames) {
+        const started = Date.now();
+        await eagleGet("/api/application/info");   // 先探活：Eagle 没开就给明确提示，别白传几十张
+        const folderName = els.eagleFolder.value.trim();
+        let folderId = "";
+        try {
+          folderId = await resolveEagleFolderId(folderName);
+        } catch (error) {
+          log("读取 Eagle 文件夹失败：" + error.message);
+        }
+        const tags = eagleTagList();
+        log("开始发送 " + frames.length + " 张到 Eagle"
+          + (folderName ? "（文件夹「" + folderName + "」" + (folderId ? "" : "→ 将新建") + "）"
+                        : "（未指定文件夹，落到「未分类」）")
+          + (tags.length ? "，带 " + tags.length + " 个标签" : "") + "。");
+        let ok = 0;
+        const failures = [];
+        for (let index = 0; index < frames.length; index += 1) {
+          setProgress(Math.round((index / frames.length) * 100), "发送 " + (index + 1) + "/" + frames.length);
+          try {
+            await eagleSendOne(frames[index].blob, frames[index].name, folderId, tags);
+            ok += 1;
+          } catch (error) {
+            failures.push(frames[index].name + "：" + error.message);
+          }
+        }
+        const seconds = ((Date.now() - started) / 1000).toFixed(1);
+        log("Eagle 发送结束：提交成功 " + ok + "/" + frames.length + "，用时 " + seconds + " 秒。"
+          + (failures.length ? " 失败 " + failures.length + " 张，例如 " + failures.slice(0, 2).join("；") : ""));
+        return { ok: ok, total: frames.length, failures: failures };
+      }
+
+      /* 两个按钮共用这一份，只有"取哪些帧"不同 */
+      async function runEagleSend(sourceFrames, what) {
+        if (isRunning) { return; }
+        if (!getKeptFrames().length) {
+          log("请先在「序列帧整理」里点「开始拆分」拆出帧 —— 直接发送用的就是界面里这些帧。");
+          return;
+        }
+        if (!maskActive()) {
+          log("请先在抠图模块点「✦ 应用抠图」确认效果，再发送到 Eagle。");
+          return;
+        }
         isRunning = true;
         els.runButton.disabled = true;
         els.sendEagleButton.disabled = true;
         els.sendSelectedEagleButton.disabled = true;
         setResultState("", "发送中");
-        setProgress(8, "准备 Eagle 分支");
-        connectWebSocket();
-        const selectedIndexes = getSelectedFrameIndexes();
-        log(selectedIndexes.length
-          ? `视频已确认，开始发送 ${selectedIndexes.length} 张手动挑选帧到 Eagle。`
-          : "视频已确认，开始执行 D2 Send Eagle 分支。");
-
+        setProgress(2, "准备发送");
         try {
-          const eaglePrompt = createEaglePrompt();
-          const submit = await jsonRequest(`${COMFY_URL}/prompt`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              prompt: eaglePrompt,
-              client_id: clientId
-            })
-          });
-
-          if (!submit || !submit.prompt_id) {
-            const errorDetail = submit && submit.node_errors
-              ? JSON.stringify(submit.node_errors)
-              : "没有返回 prompt_id";
-            throw new Error(errorDetail);
-          }
-
-          activePromptId = submit.prompt_id;
-          log(`Eagle 任务已提交：${activePromptId}`);
-          setProgress(25, "抽取序列帧");
-          await waitForHistory(activePromptId, EAGLE_NODE_ID);
-          setProgress(100, "已发送到 Eagle");
-          setResultState("done", "Eagle 已接收");
-          log("序列帧已发送到 Eagle。");
+          /* 出图前先记下"这一批到底抠了没、裁了没"：日志必须写清楚，
+             否则用户没法从日志判断发出去的到底是哪种图（导出那条路一直是有写的）。 */
+          const keyedNow = maskActive();
+          const cropNow = getCropRect();
+          const frames = await buildOutputFrames(sourceFrames);
+          log("已按「" + what + "」取出 " + frames.length + " 张（"
+            + (keyedNow ? "已应用抠图，透明背景" : "未抠图，不透明")
+            + (cropNow ? "，已裁剪 " + cropNow.w + "×" + cropNow.h : "")
+            + "），开始交给 Eagle。");
+          const result = await eagleSendFrames(frames);
+          setProgress(100, "已提交给 Eagle");
+          setResultState(result.failures.length ? "error" : "done",
+            result.failures.length ? "部分失败" : "Eagle 已接收");
         } catch (error) {
           setResultState("error", "Eagle 发送失败");
           setProgress(0, "任务异常");
-          log(`Eagle 错误：${error.message}`);
+          log("Eagle 错误：" + error.message
+            + "（若提示连不上，请确认 Eagle 已启动，并在 偏好设置 → 开发者 里开启了 API）");
         } finally {
           isRunning = false;
           els.runButton.disabled = false;
-          els.sendEagleButton.disabled = false;
           updateSequenceStatus();
         }
+      }
+
+      /* 「⇧ 发送选中帧到 Eagle」：界面里手动挑出来的保留帧，全部发 */
+      function sendSelectedFramesToEagle() {
+        return runEagleSend(getKeptFrames(), "全部保留帧");
+      }
+
+      /* Eagle 模块里的「⇧ 发送到 Eagle」：按「取帧间隔 / 跳过开头」从保留帧里抽样 */
+      function sendIntervalFramesToEagle() {
+        const kept = getKeptFrames();
+        const nth = Math.max(1, Math.floor(getNumber(els.eagleInterval, 2)));
+        const skip = Math.max(0, Math.floor(getNumber(els.eagleSkip, 0)));
+        const picked = [];
+        for (let index = skip; index < kept.length; index += nth) { picked.push(kept[index]); }
+        return runEagleSend(picked.length ? picked : kept, "每 " + nth + " 帧取 1、跳过 " + skip);
       }
 
       function saveSettings() {
@@ -8657,13 +8866,10 @@
       });
       els.previousFrameButton.addEventListener("click", () => stepSequencePreview(-1));
       els.nextFrameButton.addEventListener("click", () => stepSequencePreview(1));
-      els.playSequenceButton.addEventListener("click", playSequencePreview);
-      els.pauseSequenceButton.addEventListener("click", () => {
-        stopSequencePreview();
-        updateSequenceStatus();
-      });
+      /* __PLAY_TOGGLE__ 播放键自己切换播放/暂停（原来旁边还有个单独的「Ⅱ 暂停」） */
+      els.playSequenceButton.addEventListener("click", toggleSequencePreview);
       els.exportFramesButton.addEventListener("click", exportSelectedFrames);
-      els.sendSelectedEagleButton.addEventListener("click", sendToEagle);
+      els.sendSelectedEagleButton.addEventListener("click", sendSelectedFramesToEagle);   // __EAGLE_DIRECT__
       // ---- 抠图模块事件 ----
       els.applyMaskButton.addEventListener("click", applyMask);
       if (els.maskResetButton) { els.maskResetButton.addEventListener("click", resetMaskParams); }
@@ -8702,7 +8908,7 @@
       syncMaskUI();
       els.clearHistoryButton.addEventListener("click", clearHistoryRecords);
       els.runButton.addEventListener("click", runGeneration);
-      els.sendEagleButton.addEventListener("click", sendToEagle);
+      els.sendEagleButton.addEventListener("click", sendIntervalFramesToEagle);   // __EAGLE_DIRECT__
       els.resetButton.addEventListener("click", resetSettings);
       els.downloadButton.addEventListener("click", () => {
         if (!outputUrl) return;
@@ -8770,6 +8976,7 @@
         previewZoomBadge.hidden = !zoomed;
         previewZoomBadge.textContent = `${Math.round(previewZoom * 100)}%`;
         if (previewStage) { previewStage.classList.toggle("zoomed", zoomed); }
+        syncCropLayer();   // __CROP_EXPORT__ 缩放/平移之后选框要跟着走
       }
 
       function resetPreviewZoom() {
@@ -8838,6 +9045,237 @@
         previewStage.addEventListener("pointerup", endPreviewPan);
         previewStage.addEventListener("pointercancel", endPreviewPan);
       }
+
+      /* ============================================================
+         __CROP_EXPORT__ 裁剪导出（2026-09-15，用户要求）
+         「⬚ 裁剪」→ 在动画预览上拖出一个框（像截图）→「↓ 导出 PNG ZIP」只导出框内区域，
+         导出尺寸 = 框的像素尺寸。**只作用于 ZIP 导出**，发送到 Eagle 那条链路不受影响。
+
+         为什么这么写（每条都对应本项目踩过的坑）：
+         1. canvas 是 `object-fit: contain` —— 元素框通常比实际画的图大（两侧或上下有留白），
+            所以换算必须按"实际绘制区"（居中、等比）算；直接拿元素框会让选框整体偏移。
+         2. 缩放/平移是 CSS transform 加在 canvas 上，getBoundingClientRect() 已含变换 ——
+            同一套公式天然跟随滚轮缩放与拖动平移，不需要单独处理 z / tx / ty。
+         3. 选框存【图像像素坐标】，不存屏幕坐标：屏坐标会随缩放和窗口大小失效。
+         4. 选框画在 DOM 覆盖层上，不画进 canvas：canvas 在播放时每秒重绘十几次，
+            画进去就得每帧重画、还要跟异步抠图结果抢；DOM 层只改样式，零干扰。
+         5. 状态用 var 而不是 let：applyPreviewZoom() 也会被更早的路径调到，
+            用 let 会踩暂时性死区（TDZ）直接抛错；var 提升后是 undefined，天然安全。
+         6. 这里**不引用** previewStage 那个 const（它有 TDZ 风险），一律用
+            els.sequenceCanvas.parentElement 现取。
+         ============================================================ */
+      var cropRect = null;        // {x,y,w,h} 图像像素；null = 不裁剪
+      var cropMode = false;
+      var cropDrag = null;
+      var cropLayerEl = null;
+      var cropMarqueeEl = null;
+      var cropBadgeEl = null;
+      const CROP_MIN_PX = 8;      // 小于它就当误点，不设框
+
+      function cropStage() {
+        return els.sequenceCanvas ? els.sequenceCanvas.parentElement : null;
+      }
+
+      function cropImageSize() {
+        const canvas = els.sequenceCanvas;
+        return { w: canvas.width, h: canvas.height };
+      }
+
+      /* canvas 元素框 → 实际绘制区（把 object-fit: contain 的留白减掉） */
+      function cropDrawBox() {
+        const canvas = els.sequenceCanvas;
+        const img = cropImageSize();
+        if (!img.w || !img.h || img.w < 2 || img.h < 2) { return null; }
+        const el = canvas.getBoundingClientRect();
+        if (!el.width || !el.height) { return null; }
+        const scale = Math.min(el.width / img.w, el.height / img.h);
+        const w = img.w * scale;
+        const h = img.h * scale;
+        return { left: el.left + (el.width - w) / 2, top: el.top + (el.height - h) / 2, scale, w, h };
+      }
+
+      function cropClampRect(rect) {
+        const img = cropImageSize();
+        const x = Math.max(0, Math.min(img.w, Math.round(rect.x)));
+        const y = Math.max(0, Math.min(img.h, Math.round(rect.y)));
+        return {
+          x: x, y: y,
+          w: Math.max(0, Math.min(img.w - x, Math.round(rect.w))),
+          h: Math.max(0, Math.min(img.h - y, Math.round(rect.h)))
+        };
+      }
+
+      /* 对外只用这个：拿到"真正要用的裁剪矩形"。整帧裁剪等同不裁剪（这样导出的字节不会白变） */
+      function getCropRect() {
+        if (!cropRect) { return null; }
+        const img = cropImageSize();
+        const r = cropClampRect(cropRect);
+        if (r.w < 1 || r.h < 1) { return null; }
+        if (r.x === 0 && r.y === 0 && r.w === img.w && r.h === img.h) { return null; }
+        return r;
+      }
+
+      function cropEnsureLayer() {
+        if (cropLayerEl) { return; }
+        const stage = cropStage();
+        if (!stage) { return; }
+        cropLayerEl = document.createElement("div");
+        cropLayerEl.className = "crop-layer";
+        cropLayerEl.hidden = true;
+        cropMarqueeEl = document.createElement("div");
+        cropMarqueeEl.className = "crop-marquee";
+        cropMarqueeEl.hidden = true;
+        cropLayerEl.appendChild(cropMarqueeEl);
+        cropBadgeEl = document.createElement("button");
+        cropBadgeEl.type = "button";
+        cropBadgeEl.className = "crop-badge";
+        cropBadgeEl.hidden = true;
+        cropBadgeEl.title = "点击清除裁剪框（导出恢复为整帧）";
+        stage.appendChild(cropLayerEl);
+        stage.appendChild(cropBadgeEl);
+        cropBadgeEl.addEventListener("click", (event) => {
+          event.stopPropagation();
+          cropRect = null;
+          log("已清除裁剪框，导出恢复为整帧。");
+          /* 顺手退出裁剪模式：覆盖层若留着会继续接管指针（滚轮还能过、拖动平移过不去），
+             而徽标已经消失，用户看不出"还在裁剪模式" —— 清除就干净收场。 */
+          setCropMode(false);
+        });
+        cropLayerEl.addEventListener("pointerdown", cropPointerDown);
+        cropLayerEl.addEventListener("pointermove", cropPointerMove);
+        cropLayerEl.addEventListener("pointerup", cropPointerEnd);
+        cropLayerEl.addEventListener("pointercancel", cropPointerEnd);
+      }
+
+      function cropHideAll() {
+        if (cropLayerEl) { cropLayerEl.hidden = true; }
+        if (cropMarqueeEl) { cropMarqueeEl.hidden = true; }
+        if (cropBadgeEl) { cropBadgeEl.hidden = true; }
+      }
+
+      function syncCropLayer() {
+        if (!cropMode && !cropRect) { cropHideAll(); return; }
+        const box = cropDrawBox();
+        if (!box) { cropHideAll(); return; }
+        cropEnsureLayer();
+        if (!cropLayerEl) { return; }
+        const stage = cropStage();
+        if (!stage) { return; }
+        const stageBox = stage.getBoundingClientRect();
+        cropLayerEl.hidden = false;
+        cropLayerEl.style.left = (box.left - stageBox.left) + "px";
+        cropLayerEl.style.top = (box.top - stageBox.top) + "px";
+        cropLayerEl.style.width = box.w + "px";
+        cropLayerEl.style.height = box.h + "px";
+        if (!cropRect) {
+          cropMarqueeEl.hidden = true;
+          cropBadgeEl.hidden = true;
+          return;
+        }
+        cropMarqueeEl.hidden = false;
+        cropMarqueeEl.style.left = (cropRect.x * box.scale) + "px";
+        cropMarqueeEl.style.top = (cropRect.y * box.scale) + "px";
+        cropMarqueeEl.style.width = (cropRect.w * box.scale) + "px";
+        cropMarqueeEl.style.height = (cropRect.h * box.scale) + "px";
+        cropBadgeEl.hidden = false;
+        cropBadgeEl.textContent = cropRect.w + "×" + cropRect.h + " · 清除";
+      }
+
+      function cropToImagePoint(box, clientX, clientY) {
+        const img = cropImageSize();
+        return {
+          x: Math.max(0, Math.min(img.w, (clientX - box.left) / box.scale)),
+          y: Math.max(0, Math.min(img.h, (clientY - box.top) / box.scale))
+        };
+      }
+
+      function cropPointerDown(event) {
+        if (!cropMode || event.button !== 0) { return; }
+        const box = cropDrawBox();
+        if (!box) { return; }
+        event.preventDefault();
+        event.stopPropagation();     // 别让舞台的"拖动平移"也拿到这一次按压
+        try { cropLayerEl.setPointerCapture(event.pointerId); } catch (error) { /* 不支持就算了 */ }
+        const p = cropToImagePoint(box, event.clientX, event.clientY);
+        cropDrag = { startX: p.x, startY: p.y };
+        cropRect = cropClampRect({ x: p.x, y: p.y, w: 0, h: 0 });
+        syncCropLayer();
+      }
+
+      function cropPointerMove(event) {
+        if (!cropDrag) { return; }
+        const box = cropDrawBox();
+        if (!box) { return; }
+        event.preventDefault();
+        event.stopPropagation();
+        const p = cropToImagePoint(box, event.clientX, event.clientY);
+        cropRect = cropClampRect({
+          x: Math.min(cropDrag.startX, p.x),
+          y: Math.min(cropDrag.startY, p.y),
+          w: Math.abs(p.x - cropDrag.startX),
+          h: Math.abs(p.y - cropDrag.startY)
+        });
+        syncCropLayer();
+      }
+
+      function cropPointerEnd(event) {
+        if (!cropDrag) { return; }
+        cropDrag = null;
+        try { cropLayerEl.releasePointerCapture(event.pointerId); } catch (error) { /* 已释放 */ }
+        if (!cropRect || cropRect.w < CROP_MIN_PX || cropRect.h < CROP_MIN_PX) {
+          cropRect = null;
+          log("裁剪框太小（不足 " + CROP_MIN_PX + "×" + CROP_MIN_PX + " 像素），已忽略。");
+        } else {
+          log("裁剪框：" + cropRect.w + "×" + cropRect.h + " 像素（左上角 " + cropRect.x + ", " + cropRect.y + "）—— 导出的 PNG 就是这个尺寸。");
+        }
+        updateCropButton();
+        syncCropLayer();
+      }
+
+      function updateCropButton() {
+        if (!els.cropButton) { return; }
+        const hasKept = getKeptFrames().length > 0;
+        const r = getCropRect();
+        els.cropButton.disabled = !hasKept;
+        els.cropButton.textContent = cropMode ? "✓ 完成" : "⬚ 裁剪";
+        els.cropButton.classList.toggle("primary", cropMode);
+        els.cropButton.title = cropMode
+          ? "结束裁剪：先在预览上按住左键拖出一个框"
+          : (r ? "当前裁剪 " + r.w + "×" + r.h + "，点此重画" : "在预览上拖出一个框，导出 PNG 时只导出框内区域");
+      }
+
+      function setCropMode(next) {
+        const canCrop = getKeptFrames().length > 0 && cropDrawBox() !== null;
+        cropMode = Boolean(next) && canCrop;
+        const stage = cropStage();
+        if (stage) { stage.classList.toggle("cropping", cropMode); }
+        if (cropMode) {
+          log("裁剪模式：在预览图上按住左键拖出一个框，再点「✓ 完成」结束（Esc 也可以）。");
+        }
+        updateCropButton();
+        syncCropLayer();
+      }
+
+      function resetCropExport() {
+        cropRect = null;
+        cropDrag = null;
+        setCropMode(false);
+      }
+
+      /* 把裁剪矩形从任意来源（canvas 或 ImageBitmap）抠出来，做成一个新 canvas */
+      function cropToCanvas(source, rect) {
+        const canvas = document.createElement("canvas");
+        canvas.width = rect.w;
+        canvas.height = rect.h;
+        const context = canvas.getContext("2d");
+        context.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+        return canvas;
+      }
+
+      els.cropButton.addEventListener("click", () => { setCropMode(!cropMode); });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && cropMode) { setCropMode(false); }
+      });
 
       /* __EAGLE_LIKE2__ 批量选择：按钮与快捷键共用同一份实现，避免两处逻辑走偏 */
       function setAllFramesSelected(selected) {
