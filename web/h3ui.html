@@ -6301,7 +6301,11 @@
           </div>
         </details>
       </section>
-        <details class="panel log-panel">
+        <!-- __LOG_PANEL_OPEN__ 原来这里少了 open：左列的 flex 会把这个面板撑成半列高（约 800px），
+             但 <details> 折叠时内容不参与绘制 → 左下角就是一个大空盒子，用户看不到任何任务反馈。
+             CSS 早就给 .log-panel > .panel-body 和 #log 写好了"撑满 + overflow-y: auto"，
+             显然本意就是默认展开。加上 open 即恢复本意。 -->
+        <details class="panel log-panel" open>
           <summary class="panel-header">任务记录</summary>
           <div class="panel-body">
             <div id="log">界面已准备就绪。</div>
