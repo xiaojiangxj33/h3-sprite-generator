@@ -54,6 +54,8 @@
 
 想开机就自动打开界面的话，可以再配一个"ComfyUI 就绪即自动开窗"的小插件（本仓库只管界面本身，不含启动器）。
 
+> 配套节点：要把帧**发送到 Eagle**，还需装 **[ComfyUI-H3-ImageKey](https://github.com/xiaojiangxj33/ComfyUI-H3-ImageKey)**（见下「依赖」）。只做预览 / 导出 PNG ZIP 则不需要它。
+
 ---
 
 ## 依赖
@@ -70,7 +72,7 @@
 | `MiniMaxH3*` (T8) | [T8mars/comfyui-minimax-h3-audio-T8](https://github.com/T8mars/comfyui-minimax-h3-audio-T8) | 视频生成主体 |
 | `VHS_VideoCombine` `VHS_SelectImages` `VHS_SelectEveryNthImage` | [Kosinkadink/ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) | 合成视频 / 选帧 |
 | `D2 Send Eagle` | ComfyUI-d2-send-eagle | 把序列帧送进 Eagle |
-| `H3ImageKey` | 作者单独发布（**尚未公开，本仓库不含**） | 只在"发送到 Eagle"那一步执行抠图；预览与 ZIP 导出不需要它 |
+| `H3ImageKey` | **[xiaojiangxj33/ComfyUI-H3-ImageKey](https://github.com/xiaojiangxj33/ComfyUI-H3-ImageKey)** | 只在"发送到 Eagle"那一步执行抠图；预览与 ZIP 导出不需要它 |
 
 配套工作流在 `workflows/` 里，直接在 ComfyUI 里「打开」即可。
 
@@ -86,7 +88,9 @@
 | **↓ 导出 PNG ZIP** | 前端内置的 JS 算法 | **不需要** |
 | 点**「⇧ 发送选中帧到 Eagle」** | 提交给 ComfyUI 的一条 `H3ImageKey` 节点 | **需要** |
 
-也就是说：**装本仓库就能调参、能预览、能导出带透明背景的 PNG ZIP**；只有"直接送进 Eagle"这一步会用到 `H3ImageKey` 节点。它由作者**单独一个仓库**发布（**尚未公开**，本仓库不含），需要的话请一并装进 `custom_nodes/`。
+也就是说：**装本仓库就能调参、能预览、能导出带透明背景的 PNG ZIP**；只有"直接送进 Eagle"这一步会用到 `H3ImageKey` 节点。它由作者**单独一个仓库**发布 —— [xiaojiangxj33/ComfyUI-H3-ImageKey](https://github.com/xiaojiangxj33/ComfyUI-H3-ImageKey)，需要的话请一并装进 `custom_nodes/`。
+
+> 两个仓库是配套的：本仓库是**前端**，H3-ImageKey 是**抠图节点**。前端的抠图控件名与节点的输入一一对应，界面里调成什么样，Eagle 里出来就是什么样。
 
 > 三个出口的抠图判据是同一个：只要你在抠图模块里拖过滑块或点过「✦ 应用抠图」，预览、ZIP 导出、发 Eagle 就都是抠好的；**没碰过抠图模块时，导出的就是原始的不透明帧**（导出按钮的悬浮提示会写明这次会不会带透明）。
 
