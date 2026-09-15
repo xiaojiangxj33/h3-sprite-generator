@@ -6228,6 +6228,25 @@
     }
 
 
+    /* ============================================================
+       __LOG_PANEL_FIXED__ 任务记录常开（2026-09-15 用户要求）
+         · 去掉右上角那个「+ / −」标记 —— 它暗示"能关掉"，但这个面板本该一直开着
+         · 折叠行为由下面的 JS 禁掉（preventDefault summary 的 click）
+       特异性说明：各皮肤都有 `:root[data-skin="X"] .log-panel[open] summary::after`（0,4,2），
+       下面这条写成 :root:root 后同样是 (0,4,2) —— 持平，靠"在样式表最后"取胜，
+       **所以这段必须留在末尾，别挪到中间**。
+       ============================================================ */
+
+    :root:root .log-panel summary::after,
+    :root:root .log-panel[open] summary::after {
+      content: none;
+    }
+
+    :root:root .log-panel > .panel-header {
+      cursor: default;
+    }
+
+
   </style>
 </head>
 <body>
@@ -8914,6 +8933,18 @@
       els.runButton.addEventListener("click", runGeneration);
       els.sendEagleButton.addEventListener("click", sendIntervalFramesToEagle);   // __EAGLE_DIRECT__
       els.resetButton.addEventListener("click", resetSettings);
+      /* __LOG_PANEL_FIXED__ 任务记录常开：点标题不再折叠。
+         <summary> 的 Enter / Space 在 Chrome 里也会派发 click，所以拦 click 就覆盖了键鼠两条路。
+         同时把 open 再置一次，防止以后有什么代码把它关掉。 */
+      (() => {
+        const panel = document.querySelector(".log-panel");
+        if (!panel) { return; }
+        panel.open = true;
+        const header = panel.querySelector("summary");
+        if (header) {
+          header.addEventListener("click", (event) => { event.preventDefault(); });
+        }
+      })();
       els.downloadButton.addEventListener("click", () => {
         if (!outputUrl) return;
         const link = document.createElement("a");
