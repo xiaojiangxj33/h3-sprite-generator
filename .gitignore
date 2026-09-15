@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# 本项目的回退备份（h3ui.html.bak-*）不进仓库
+*.bak-*
+*.broken
+
+# 本地临时
+*.log
+.tmp/
