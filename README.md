@@ -31,7 +31,7 @@
 |---|---|
 | `Shift` + 左键 | 从上次点到这次点之间的帧**全部选中**（可连续往外扩） |
 | `Ctrl`/`⌘` + 左键 | 只追加 / 取消这一帧 |
-| 左键单击 | 翻转这一帧的保留状态，并让预览跳到它 |
+| 左键单击 | 翻转这一帧的保留状态；这一帧**被保留**时预览同时跳到它 |
 | `←` / `→` | 上一帧 / 下一帧（播放中按会先停播） |
 | `空格` | 播放 / 暂停 |
 | 滚轮 | 以光标为中心缩放预览（20%–800%），放大后可按住左键拖动平移 |
@@ -52,7 +52,7 @@
 
 > 目录**叫什么名字，URL 里就是什么**。根目录那个 `__init__.py` 只做一件事：声明 `WEB_DIRECTORY = "./web"`，ComfyUI 就会把 `web/` 挂到 `/extensions/<目录名>/`。删掉整个目录即可完全回退，不影响 ComfyUI 和其它节点。
 
-想开机就自动打开界面的话，可以配合 [h3ui-autolaunch](https://github.com/) 那类"ComfyUI 就绪即开窗"的小插件；本仓库只管界面本身。
+想开机就自动打开界面的话，可以再配一个"ComfyUI 就绪即自动开窗"的小插件（本仓库只管界面本身，不含启动器）。
 
 ---
 
@@ -70,7 +70,7 @@
 | `MiniMaxH3*` (T8) | [T8mars/comfyui-minimax-h3-audio-T8](https://github.com/T8mars/comfyui-minimax-h3-audio-T8) | 视频生成主体 |
 | `VHS_VideoCombine` `VHS_SelectImages` `VHS_SelectEveryNthImage` | [Kosinkadink/ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) | 合成视频 / 选帧 |
 | `D2 Send Eagle` | ComfyUI-d2-send-eagle | 把序列帧送进 Eagle |
-| `H3ImageKey` | 作者另有一个仓库单独发布（**本仓库不含**） | 只在"发送到 Eagle"那一步执行抠图；预览与 ZIP 导出不需要它 |
+| `H3ImageKey` | 作者单独发布（**尚未公开，本仓库不含**） | 只在"发送到 Eagle"那一步执行抠图；预览与 ZIP 导出不需要它 |
 
 配套工作流在 `workflows/` 里，直接在 ComfyUI 里「打开」即可。
 
@@ -86,7 +86,7 @@
 | **↓ 导出 PNG ZIP** | 前端内置的 JS 算法 | **不需要** |
 | 点**「⇧ 发送选中帧到 Eagle」** | 提交给 ComfyUI 的一条 `H3ImageKey` 节点 | **需要** |
 
-也就是说：**装本仓库就能调参、能预览、能导出带透明背景的 PNG ZIP**；只有"直接送进 Eagle"这一步会用到 `H3ImageKey` 节点。它由作者**单独一个仓库**发布（本仓库不含），需要的话请一并装进 `custom_nodes/`。
+也就是说：**装本仓库就能调参、能预览、能导出带透明背景的 PNG ZIP**；只有"直接送进 Eagle"这一步会用到 `H3ImageKey` 节点。它由作者**单独一个仓库**发布（**尚未公开**，本仓库不含），需要的话请一并装进 `custom_nodes/`。
 
 > 三个出口的抠图判据是同一个：只要你在抠图模块里拖过滑块或点过「✦ 应用抠图」，预览、ZIP 导出、发 Eagle 就都是抠好的；**没碰过抠图模块时，导出的就是原始的不透明帧**（导出按钮的悬浮提示会写明这次会不会带透明）。
 
