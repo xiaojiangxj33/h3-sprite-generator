@@ -15,3 +15,12 @@ desktop.ini
 # 本地临时
 *.log
 .tmp/
+# ComfyUI 自定义节点自带的静态文件：只在本地供 ComfyUI 伺服，不是本仓库代码
+web/long_video_background.js
+web/studio_timeline_v2.js
+web/task_type_labels.js
+web/task_type_labels-*.js
+
+# 改动前的备份
+h3ui.html.bak-*
+web/h3ui.html.bak-*
