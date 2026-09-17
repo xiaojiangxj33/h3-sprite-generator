@@ -4,93 +4,58 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>游戏特效序列帧生成器</title>
-  <style>
-    /* ============================================================
-       三个正交维度
-         data-skin   未设/"neu"=新拟物｜"bento"=便当盒｜"fluent"=流利设计｜"gradient"=现代渐变
-         data-theme  未设/"light"=亮色｜"dark"=暗夜
-         动效层      跨所有皮肤共用（时序参数由各皮肤令牌覆盖）
-       每套皮肤自成一个作用域块（令牌 + 自身基础规则），不依赖源顺序。
-       新增皮肤：加 :root[data-skin="X"] 令牌块（亮/暗）+ 选择器按钮 + SKIN_LABEL/SKINS。
-       ============================================================ */
-
-    /* ============ 公共控件：亮暗开关 / 皮肤选择器 ============
-       注意：这两个控件不能用 --muted / --ink-soft 之类"弱化色"。
-       因为它们的底色是 --surface-well，而弱化色的对比度只对
-       --surface 保证过；在便当盒暗色下 --ink-soft 对 well 只有 1.45。
-       统一按 --ink 对 --surface-lift / --surface 的组合取色。 */
-
-    .mode-switch {
-      display: inline-flex;
-      gap: 2px;
-      padding: 3px;
-      border-radius: var(--r-pill);
-      background: var(--surface-well);
-    }
-
-    .mode-switch button {
+  <style>    /* ============ 亮暗切换按钮（无限画布同款） ============
+       一个圆形图标按钮：暗色显示太阳、亮色显示月亮（表示"点它会切到哪边"）。
+       配色遵守上方那条既有约定：这类控件底色用 --surface-lift、字色用 --ink，
+       不用弱化色（弱化色的对比度只对 --surface 保证过）。 */
+    .theme-toggle {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 36px;
-      height: 34px;
+      width: 42px;
+      height: 42px;
       padding: 0;
       border: 0;
       border-radius: var(--r-pill);
       color: var(--ink);
       background: var(--surface-lift);
-      box-shadow: none;
-      font-size: 14px;
+      box-shadow: var(--nm-sm);
+      font-size: 17px;
       line-height: 1;
       cursor: pointer;
       transition: none;
     }
 
-    .mode-switch button:hover {
+    .theme-toggle:hover:not(:disabled) {
       color: var(--ink);
       background: var(--surface-lift);
+      box-shadow: var(--nm-xs);
     }
 
-    /* 选中态用反色：--ink 底 + --surface 字，对比度最高且与皮肤无关 */
-    .mode-switch button[aria-pressed="true"] {
-      color: var(--surface);
-      background: var(--ink);
-      box-shadow: var(--nm-sm);
+    .theme-toggle:active:not(:disabled) {
+      box-shadow: var(--nm-in-sm);
     }
 
-    .skin-picker {
-      display: inline-flex;
-      gap: 2px;
-      padding: 3px;
-      border-radius: var(--r-pill);
-      background: var(--surface-well);
+    /* __THEME_TOGGLE_CANVAS_STYLE__
+       亮暗切换的圆形揭示：与无限画布的 AnimatedThemeToggler 同款。
+       新主题作为 ::view-transition-new(root) 铺在上层，用从按钮中心扩散的 circle() 揭示。
+       用户要求减少动效时整段不生效（下面的媒体查询），JS 里也会退化为直接切换。 */
+    @media (prefers-reduced-motion: no-preference) {
+      :root[data-theme-vt="active"]::view-transition-old(root),
+      :root[data-theme-vt="active"]::view-transition-new(root) {
+        animation: none;
+        mix-blend-mode: normal;
+      }
+
+      :root[data-theme-vt="active"]::view-transition-old(root) {
+        z-index: 1;
+      }
+
+      :root[data-theme-vt="active"]::view-transition-new(root) {
+        z-index: 2;
+      }
     }
 
-    .skin-picker button {
-      min-height: 34px;
-      padding: 0 13px;
-      border: 0;
-      border-radius: var(--r-pill);
-      color: var(--ink);
-      background: var(--surface-lift);
-      box-shadow: none;
-      font-size: 12px;
-      font-weight: 500;
-      white-space: nowrap;
-      cursor: pointer;
-      transition: none;
-    }
-
-    .skin-picker button:hover {
-      color: var(--ink);
-      background: var(--surface-lift);
-    }
-
-    .skin-picker button[aria-checked="true"] {
-      color: var(--surface);
-      background: var(--ink);
-      box-shadow: var(--nm-sm);
-    }
 
     /* ============================================================
        皮肤一 · 新拟物派（默认）
@@ -159,75 +124,6 @@
       --divider-mid: rgba(176, 182, 195, .35);
       --divider-strong: rgba(176, 182, 195, .45);
       --accent-deep-shadow: rgba(38, 28, 130, .30);
-      --accent-press-color: #5d4ef0;
-      --motion-fast: 150ms;
-      --motion-card: 200ms;
-      --motion-ease: ease-out;
-    }
-
-    :root[data-theme="dark"]:not([data-skin="bento"]):not([data-skin="fluent"]):not([data-skin="gradient"]) {
-      color-scheme: dark;
-      --surface: #2b2f38;
-      --surface-lift: #333845;
-      --surface-well: #23262e;
-      --dark: #171a1f;
-      --light: #4d5261;
-      --ink: #e8ebf0;
-      --ink-soft: #c6ccd8;
-      --muted: #aab1c0;
-      --accent: #5b4be0;
-      --accent-shadow: rgba(0, 0, 0, .46);
-      --red: #e2536a;
-      --red-shadow: rgba(0, 0, 0, .46);
-      --yellow: #d8a12a;
-      --yellow-shadow: rgba(0, 0, 0, .46);
-      --teal: #2f9e8f;
-      --teal-shadow: rgba(0, 0, 0, .46);
-      --accent-ink: #a08fff;
-      --red-ink: #ef94a3;
-      --yellow-ink: #dfb459;
-      --teal-ink: #6cc7b8;
-      --nm-xs: 3px 3px 6px var(--dark), -3px -3px 6px var(--light);
-      --nm-sm: 4px 4px 8px var(--dark), -4px -4px 8px var(--light);
-      --nm-md: 6px 6px 12px var(--dark), -6px -6px 12px var(--light);
-      --nm-lg: 8px 8px 16px var(--dark), -8px -8px 16px var(--light);
-      --nm-xl: 10px 10px 20px var(--dark), -10px -10px 20px var(--light);
-      --nm-deep: 14px 14px 28px var(--dark), -14px -14px 28px var(--light);
-      --nm-in-xs: inset 2px 2px 4px var(--dark), inset -2px -2px 4px var(--light);
-      --nm-in-sm: inset 4px 4px 8px var(--dark), inset -4px -4px 8px var(--light);
-      --nm-in-md: inset 6px 6px 12px var(--dark), inset -6px -6px 12px var(--light);
-      --nm-in-lg: inset 8px 8px 16px var(--dark), inset -8px -8px 16px var(--light);
-      --r-sm: 10px;
-      --r-md: 14px;
-      --r-lg: 20px;
-      --r-xl: 28px;
-      --r-pill: 999px;
-      --shadow: none;
-      --on-accent: #ffffff;
-      --accent-deep: #5d4ef0;
-      --accent-press: inset 4px 4px 10px rgba(38, 28, 130, .40), inset -4px -4px 10px rgba(255, 255, 255, .22);
-      --accent-trough: inset 0 -2px 4px rgba(38, 28, 130, .30), inset 0 2px 4px rgba(255, 255, 255, .30);
-      --body-glow: none;
-      --panel-bg: var(--surface-lift);
-      --card-glass: transparent;
-      --card-glass-border: transparent;
-      --card-border: transparent;
-      --card-divider: #3a3f4b;
-      --control-bg: #f0f2f5;
-      --field-bg: #2b2f38;
-      --field-border: transparent;
-      --field-border-focus: #a08fff;
-      --placeholder: #9aa2b3;
-      --faint: #9aa2b3;
-      --ring: rgba(160, 143, 255, .22);
-      --ring-focus: rgba(160, 143, 255, .32);
-      --chrome: #0b0d11;
-      --stage-bg: #23262e;
-      --checker: rgba(255, 255, 255, .05);
-      --divider: #1b1e25;
-      --divider-mid: #171a20;
-      --divider-strong: #12141a;
-      --accent-deep-shadow: rgba(0, 0, 0, .40);
       --accent-press-color: #5d4ef0;
       --motion-fast: 150ms;
       --motion-card: 200ms;
@@ -1347,1303 +1243,6 @@
 
     .hidden {
       display: none !important;
-    }
-
-    :root[data-theme="dark"]:not([data-skin="bento"]):not([data-skin="fluent"]):not([data-skin="gradient"]) .preview-stage {
-      background:
-        linear-gradient(45deg, var(--checker) 25%, transparent 25%),
-        linear-gradient(-45deg, var(--checker) 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, var(--checker) 75%),
-        linear-gradient(-45deg, transparent 75%, var(--checker) 75%),
-        var(--stage-bg);
-      background-position: 0 0, 0 12px, 12px -12px, -12px 0;
-      background-size: 24px 24px;
-    }
-
-    /* ============================================================
-       皮肤二 · 便当盒 Bento Grid
-       ============================================================ */
-
-    :root[data-skin="bento"] {
-      color-scheme: light;
-      --surface: #fafafa;
-      --surface-lift: #ffffff;
-      --surface-well: #f4f4f5;
-      --dark: #d4d4d8;
-      --light: #ffffff;
-      --card-border: #f4f4f5;
-      --card-divider: #e4e4e7;
-      --ink: #18181b;
-      --ink-soft: #3f3f46;
-      --muted: #52525b;
-      --faint: #71717a;
-      --accent: #18181b;
-      --accent-deep: #27272a;
-      --accent-shadow: rgba(24, 24, 27, .22);
-      --accent-deep-shadow: rgba(24, 24, 27, .28);
-      --accent-press: inset 0 2px 4px rgba(0, 0, 0, .28);
-      --accent-trough: inset 0 1px 3px rgba(0, 0, 0, .18);
-      --red: #dc2626;
-      --red-ink: #b91c1c;
-      --red-shadow: rgba(220, 38, 38, .22);
-      --yellow: #d97706;
-      --yellow-ink: #b45309;
-      --yellow-shadow: rgba(217, 119, 6, .22);
-      --teal: #0d9488;
-      --teal-ink: #0f766e;
-      --teal-shadow: rgba(13, 148, 136, .22);
-      --control-bg: #ffffff;
-      --field-bg: #ffffff;
-      --field-border: #e4e4e7;
-      --field-border-focus: #18181b;
-      --placeholder: #71717a;
-      --on-accent: #ffffff;
-      --ring: rgba(24, 24, 27, .10);
-      --ring-focus: rgba(24, 24, 27, .14);
-      --divider: #e4e4e7;
-      --divider-mid: #e4e4e7;
-      --divider-strong: #d4d4d8;
-      --chrome: #18181b;
-      --stage-bg: #f4f4f5;
-      --checker: rgba(24, 24, 27, .07);
-      --nm-xs: 0 1px 2px rgba(0, 0, 0, .05);
-      --nm-sm: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
-      --nm-md: 0 4px 12px rgba(0, 0, 0, .07);
-      --nm-lg: 0 8px 24px rgba(0, 0, 0, .08);
-      --nm-xl: 0 12px 32px rgba(0, 0, 0, .09);
-      --nm-deep: 0 1px 3px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .04);
-      --nm-in-xs: inset 0 1px 2px rgba(0, 0, 0, .04);
-      --nm-in-sm: inset 0 1px 2px rgba(0, 0, 0, .04);
-      --nm-in-md: inset 0 1px 2px rgba(0, 0, 0, .04);
-      --nm-in-lg: inset 0 1px 2px rgba(0, 0, 0, .04);
-      --r-sm: 10px;
-      --r-md: 12px;
-      --r-lg: 16px;
-      --r-xl: 16px;
-      --r-pill: 999px;
-      --shadow: none;
-      --body-glow: none;
-      --panel-bg: var(--surface-lift);
-      --card-glass: transparent;
-      --card-glass-border: transparent;
-      --accent-ink: #5b4be0;
-      --accent-press-color: #27272a;
-      --motion-fast: 150ms;
-      --motion-card: 200ms;
-      --motion-ease: ease-out;
-    }
-
-    :root[data-skin="bento"][data-theme="dark"] {
-      color-scheme: dark;
-      --surface: #09090b;
-      --surface-lift: #18181b;
-      --surface-well: #27272a;
-      --dark: #3f3f46;
-      --light: #ffffff;
-      --card-border: #27272a;
-      --card-divider: #27272a;
-      --ink: #f4f4f5;
-      --ink-soft: #e4e4e7;
-      --muted: #a1a1aa;
-      --faint: #a1a1aa;
-      --accent: #ffffff;
-      --accent-deep: #e4e4e7;
-      --accent-shadow: rgba(0, 0, 0, .55);
-      --accent-deep-shadow: rgba(0, 0, 0, .60);
-      --accent-press: inset 0 2px 4px rgba(0, 0, 0, .18);
-      --accent-trough: inset 0 1px 3px rgba(0, 0, 0, .25);
-      --red: #f87171;
-      --red-ink: #fca5a5;
-      --red-shadow: rgba(0, 0, 0, .40);
-      --yellow: #fbbf24;
-      --yellow-ink: #fcd34d;
-      --yellow-shadow: rgba(0, 0, 0, .40);
-      --teal: #2dd4bf;
-      --teal-ink: #5eead4;
-      --teal-shadow: rgba(0, 0, 0, .40);
-      --control-bg: #18181b;
-      --field-bg: #09090b;
-      --field-border: #3f3f46;
-      --field-border-focus: #a1a1aa;
-      --placeholder: #a1a1aa;
-      --on-accent: #18181b;
-      --ring: rgba(255, 255, 255, .10);
-      --ring-focus: rgba(255, 255, 255, .18);
-      --divider: #27272a;
-      --divider-mid: #27272a;
-      --divider-strong: #3f3f46;
-      --chrome: #000000;
-      --stage-bg: #27272a;
-      --checker: rgba(255, 255, 255, .06);
-      --nm-xs: 0 1px 2px rgba(0, 0, 0, .40);
-      --nm-sm: 0 1px 3px rgba(0, 0, 0, .45), 0 1px 2px rgba(0, 0, 0, .30);
-      --nm-md: 0 4px 12px rgba(0, 0, 0, .45);
-      --nm-lg: 0 8px 24px rgba(0, 0, 0, .50);
-      --nm-xl: 0 12px 32px rgba(0, 0, 0, .55);
-      --nm-deep: 0 1px 3px rgba(0, 0, 0, .45), 0 1px 2px rgba(0, 0, 0, .30);
-      --nm-in-xs: inset 0 1px 2px rgba(0, 0, 0, .30);
-      --nm-in-sm: inset 0 1px 2px rgba(0, 0, 0, .30);
-      --nm-in-md: inset 0 1px 2px rgba(0, 0, 0, .30);
-      --nm-in-lg: inset 0 1px 2px rgba(0, 0, 0, .30);
-      --r-sm: 10px;
-      --r-md: 12px;
-      --r-lg: 16px;
-      --r-xl: 16px;
-      --r-pill: 999px;
-      --shadow: none;
-      --body-glow: none;
-      --panel-bg: var(--surface-lift);
-      --card-glass: transparent;
-      --card-glass-border: transparent;
-      --accent-ink: #a08fff;
-      --accent-press-color: #e4e4e7;
-      --motion-fast: 150ms;
-      --motion-card: 200ms;
-      --motion-ease: ease-out;
-    }
-
-    *:root[data-skin="bento"] {
-      box-sizing: border-box;
-    }
-
-    html:root[data-skin="bento"] {
-      min-width: 320px;
-      background: var(--surface);
-    }
-
-    :root[data-skin="bento"] body {
-      position: relative;
-      min-height: 100vh;
-      margin: 0;
-      color: var(--ink);
-      background: var(--surface);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", Roboto, Helvetica, Arial, sans-serif;
-      font-size: 14px;
-      line-height: 1.55;
-      letter-spacing: 0;
-      overflow-x: hidden;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    button,
-    input,
-    select,
-    :root[data-skin="bento"] textarea {
-      font: inherit;
-      color: inherit;
-    }
-
-    :root[data-skin="bento"] button {
-      border: 0;
-    }
-
-    /* ---------------------------- 外壳 ---------------------------- */
-
-    :root[data-skin="bento"] .shell {
-      width: min(1360px, calc(100% - 56px));
-      margin: 0 auto;
-      padding: 34px 0 64px;
-    }
-
-    :root[data-skin="bento"] .topbar {
-      position: relative;
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 24px;
-      margin-bottom: 34px;
-    }
-
-    :root[data-skin="bento"] .eyebrow {
-      margin: 0 0 10px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: .06em;
-      text-transform: none;
-    }
-
-    h1,
-    h2,
-    :root[data-skin="bento"] p {
-      margin: 0;
-    }
-
-    :root[data-skin="bento"] h1 {
-      color: var(--ink);
-      font-size: clamp(26px, 3.6vw, 38px);
-      font-weight: 600;
-      line-height: 1.16;
-      letter-spacing: -.02em;
-      text-transform: none;
-      text-shadow: none;
-    }
-
-    :root[data-skin="bento"] .subtitle {
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 13px;
-      text-transform: none;
-    }
-
-    :root[data-skin="bento"] .top-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-
-    /* ------------------------- 状态与按钮 ------------------------- */
-
-    :root[data-skin="bento"] .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 9px;
-      min-height: 42px;
-      padding: 0 18px;
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-pill);
-      color: var(--muted);
-      background: var(--surface-lift);
-      box-shadow: var(--nm-xs);
-      font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0;
-      text-transform: none;
-      white-space: nowrap;
-    }
-
-    :root[data-skin="bento"] .status-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: var(--yellow);
-      box-shadow: 0 0 0 4px var(--yellow-shadow);
-    }
-
-    :root[data-skin="bento"] .status.connected .status-dot {
-      background: var(--teal);
-      box-shadow: 0 0 0 4px var(--teal-shadow);
-    }
-
-    :root[data-skin="bento"] .status.error .status-dot {
-      background: var(--red);
-      box-shadow: 0 0 0 4px var(--red-shadow);
-    }
-
-    :root[data-skin="bento"] .button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      min-height: 42px;
-      padding: 0 18px;
-      border: 1px solid var(--field-border);
-      border-radius: var(--r-md);
-      color: var(--ink);
-      background: var(--control-bg);
-      box-shadow: var(--nm-xs);
-      font-size: 13px;
-      font-weight: 500;
-      letter-spacing: 0;
-      text-transform: none;
-      cursor: pointer;
-      transition: none;
-    }
-
-    /* 静态状态变化：只换边框与底，不位移不缩放不扩散阴影 */
-    :root[data-skin="bento"] .button:hover:not(:disabled) {
-      color: var(--ink);
-      background: var(--surface-well);
-      border-color: var(--dark);
-      box-shadow: var(--nm-sm);
-      text-shadow: none;
-    }
-
-    :root[data-skin="bento"] .button:active:not(:disabled) {
-      transform: none;
-      background: var(--card-divider);
-      box-shadow: var(--accent-press);
-    }
-
-    .button:focus-visible,
-    .dropzone:focus-visible,
-    input:focus-visible,
-    select:focus-visible,
-    textarea:focus-visible,
-    :root[data-skin="bento"] summary:focus-visible {
-      outline: 2px solid var(--ink);
-      outline-offset: 2px;
-    }
-
-    :root[data-skin="bento"] .button:disabled {
-      cursor: not-allowed;
-      opacity: .5;
-      box-shadow: none;
-    }
-
-    :root[data-skin="bento"] .button.primary {
-      min-height: 50px;
-      border: 1px solid var(--accent);
-      border-radius: var(--r-lg);
-      color: var(--on-accent);
-      background: var(--accent);
-      box-shadow: 0 1px 2px var(--accent-shadow);
-      font-size: 15px;
-      font-weight: 600;
-    }
-
-    :root[data-skin="bento"] .button.primary:hover:not(:disabled) {
-      color: var(--on-accent);
-      background: var(--accent-deep);
-      border-color: var(--accent-deep);
-      box-shadow: 0 2px 6px var(--accent-deep-shadow);
-    }
-
-    :root[data-skin="bento"] .button.primary:active:not(:disabled) {
-      background: var(--accent-deep);
-      box-shadow: var(--accent-press);
-    }
-
-    :root[data-skin="bento"] .button.text-button {
-      min-height: 34px;
-      padding: 0 13px;
-      border-radius: var(--r-pill);
-      /* 文字按钮坐在 --surface-well 上：zinc-500 对 zinc-100 仅 4.07 不达标，
-         故用 --ink-soft（对 well 6.9）；禁用态由 opacity 表达 */
-      color: var(--ink-soft);
-      background: var(--surface-well);
-      border-color: transparent;
-      box-shadow: none;
-      font-size: 12px;
-      font-weight: 500;
-    }
-
-    :root[data-skin="bento"] .button.text-button:hover:not(:disabled) {
-      color: var(--ink);
-      background: var(--card-divider);
-      border-color: transparent;
-      box-shadow: none;
-    }
-
-    :root[data-skin="bento"] .button.text-button:active:not(:disabled) {
-      background: var(--dark);
-      box-shadow: none;
-    }
-
-    /* ------------------------- 布局与面板 ------------------------- */
-
-    :root[data-skin="bento"] .app-grid {
-      display: grid;
-      grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
-      gap: 26px;
-      align-items: start;
-    }
-
-    :root[data-skin="bento"] .panel {
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-xl);
-      background: var(--surface-lift);
-      box-shadow: var(--nm-deep);
-      overflow: hidden;
-    }
-
-    :root[data-skin="bento"] .panel-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 24px 26px 20px;
-      border-bottom: 1px solid var(--card-divider);
-    }
-
-    :root[data-skin="bento"] .panel-title {
-      color: var(--ink);
-      font-size: 17px;
-      font-weight: 600;
-      letter-spacing: -.01em;
-      text-transform: none;
-    }
-
-    :root[data-skin="bento"] .panel-caption {
-      margin-top: 7px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.6;
-    }
-
-    :root[data-skin="bento"] .panel-body {
-      padding: 24px 26px 26px;
-    }
-
-    :root[data-skin="bento"] .field + .field {
-      margin-top: 20px;
-    }
-
-    :root[data-skin="bento"] .field-label {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 9px;
-      color: var(--ink-soft);
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0;
-    }
-
-    :root[data-skin="bento"] .field-hint {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 400;
-    }
-
-    /* ---------------------------- 拖放区 ---------------------------- */
-
-    :root[data-skin="bento"] .dropzone {
-      position: relative;
-      display: grid;
-      place-items: center;
-      min-height: 250px;
-      overflow: hidden;
-      border: 1px dashed var(--field-border);
-      border-radius: var(--r-lg);
-      color: var(--muted);
-      background: var(--surface-well);
-      box-shadow: none;
-      cursor: pointer;
-      transition: none;
-    }
-
-    .dropzone:hover,
-    :root[data-skin="bento"] .dropzone.dragging {
-      border-color: var(--ink);
-      border-style: dashed;
-      background: var(--card-divider);
-      box-shadow: none;
-    }
-
-    :root[data-skin="bento"] .dropzone.has-image {
-      border-style: solid;
-      border-color: var(--field-border);
-      background: var(--surface-well);
-      box-shadow: none;
-    }
-
-    :root[data-skin="bento"] .dropzone-content {
-      display: grid;
-      justify-items: center;
-      gap: 12px;
-      padding: 24px;
-      text-align: center;
-    }
-
-    /* 唯一的强调渐变：装饰原子，不承载文字 */
-    :root[data-skin="bento"] .dropzone-mark {
-      display: grid;
-      place-items: center;
-      width: 62px;
-      height: 62px;
-      border: 0;
-      border-radius: var(--r-lg);
-      color: #ffffff;
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-      box-shadow: 0 4px 12px rgba(59, 130, 246, .28);
-      font-size: 26px;
-      font-weight: 400;
-    }
-
-    :root[data-skin="bento"] .dropzone-title {
-      color: var(--ink);
-      font-size: 15px;
-      font-weight: 600;
-    }
-
-    :root[data-skin="bento"] .dropzone-subtitle {
-      max-width: 250px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.7;
-    }
-
-    :root[data-skin="bento"] .image-preview {
-      display: none;
-      width: 100%;
-      height: 100%;
-      min-height: 250px;
-      border-radius: var(--r-md);
-      background: var(--surface-well);
-      object-fit: contain;
-    }
-
-    :root[data-skin="bento"] .dropzone.has-image .image-preview {
-      display: block;
-    }
-
-    :root[data-skin="bento"] .dropzone.has-image .dropzone-content {
-      display: none;
-    }
-
-    :root[data-skin="bento"] .image-meta {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      min-height: 30px;
-      margin-top: 10px;
-      color: var(--faint);
-      font-size: 12px;
-    }
-
-    :root[data-skin="bento"] .image-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    /* ------------------------- 表单控件 ------------------------- */
-
-    textarea,
-    input[type="number"],
-    input[type="text"],
-    :root[data-skin="bento"] select {
-      width: 100%;
-      min-height: 44px;
-      border: 1px solid var(--field-border);
-      border-radius: var(--r-md);
-      color: var(--ink);
-      background: var(--field-bg);
-      box-shadow: var(--nm-in-sm);
-      font-family: inherit;
-      font-size: 13px;
-      transition: none;
-    }
-
-    :root[data-skin="bento"] textarea {
-      min-height: 190px;
-      padding: 13px 15px;
-      resize: vertical;
-      line-height: 1.65;
-      color: var(--ink);
-    }
-
-    input[type="number"],
-    input[type="text"],
-    :root[data-skin="bento"] select {
-      padding: 0 14px;
-    }
-
-    :root[data-skin="bento"] select {
-      appearance: auto;
-      cursor: pointer;
-    }
-
-    /* focus：边框变深 + 柔和光环 */
-    textarea:focus,
-    input[type="number"]:focus,
-    input[type="text"]:focus,
-    :root[data-skin="bento"] select:focus {
-      background: var(--field-bg);
-      border-color: var(--field-border-focus);
-      box-shadow: 0 0 0 3px var(--ring-focus);
-      outline: none;
-    }
-
-    input::placeholder,
-    :root[data-skin="bento"] textarea::placeholder {
-      color: var(--placeholder);
-    }
-
-    :root[data-skin="bento"] input[type="range"] {
-      width: 100%;
-      height: 24px;
-      margin: 0;
-      background: transparent;
-      accent-color: var(--ink);
-      cursor: pointer;
-    }
-
-    :root[data-skin="bento"] .range-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 88px;
-      align-items: center;
-      gap: 14px;
-    }
-
-    :root[data-skin="bento"] .range-value {
-      min-height: 38px;
-      padding: 9px 10px;
-      border: 1px solid var(--field-border);
-      border-radius: var(--r-md);
-      color: var(--ink);
-      background: var(--surface-well);
-      box-shadow: none;
-      font-size: 12px;
-      font-weight: 600;
-      text-align: center;
-    }
-
-    :root[data-skin="bento"] .two-col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-    }
-
-    :root[data-skin="bento"] .check-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 44px;
-      color: var(--ink-soft);
-      font-size: 13px;
-      cursor: pointer;
-    }
-
-    :root[data-skin="bento"] .check-row input {
-      width: 18px;
-      height: 18px;
-      margin: 0;
-      accent-color: var(--ink);
-      cursor: pointer;
-    }
-
-    /* --------------------------- 折叠区 --------------------------- */
-
-    :root[data-skin="bento"] details {
-      margin-top: 22px;
-      border-top: 1px solid var(--card-divider);
-      padding-top: 18px;
-    }
-
-    :root[data-skin="bento"] summary {
-      color: var(--ink-soft);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0;
-      text-transform: none;
-    }
-
-    :root[data-skin="bento"] .advanced-body {
-      display: grid;
-      gap: 18px;
-      margin-top: 18px;
-    }
-
-    :root[data-skin="bento"] .eagle-details {
-      margin-top: 22px;
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-lg);
-      padding: 0 16px 16px;
-      background: var(--surface-well);
-      box-shadow: none;
-    }
-
-    :root[data-skin="bento"] .eagle-details summary {
-      padding: 15px 0;
-      color: var(--ink);
-    }
-
-    :root[data-skin="bento"] .eagle-details[open] summary {
-      border-bottom: 1px solid var(--card-divider);
-    }
-
-    :root[data-skin="bento"] .eagle-note {
-      margin: 14px 0 2px;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.7;
-    }
-
-    :root[data-skin="bento"] .history-details {
-      margin-top: 22px;
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-lg);
-      padding: 0 16px 16px;
-      background: var(--surface-well);
-      box-shadow: none;
-    }
-
-    :root[data-skin="bento"] .history-details summary {
-      padding: 15px 0;
-      color: var(--ink-soft);
-    }
-
-    :root[data-skin="bento"] .history-details[open] summary {
-      border-bottom: 1px solid var(--card-divider);
-    }
-
-    :root[data-skin="bento"] .history-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin: 14px 0;
-    }
-
-    :root[data-skin="bento"] .history-count {
-      color: var(--muted);
-      font-size: 11px;
-    }
-
-    :root[data-skin="bento"] .history-list {
-      display: grid;
-      gap: 10px;
-      max-height: 320px;
-      overflow: auto;
-      padding-right: 6px;
-      scrollbar-color: var(--dark) var(--surface-lift);
-    }
-
-    :root[data-skin="bento"] .history-item {
-      display: grid;
-      gap: 8px;
-      min-width: 0;
-      padding: 12px;
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-md);
-      background: var(--surface-lift);
-      box-shadow: var(--nm-xs);
-    }
-
-    :root[data-skin="bento"] .history-item.active {
-      background: var(--surface-lift);
-      border-color: var(--ink);
-      box-shadow: var(--nm-sm);
-    }
-
-    :root[data-skin="bento"] .history-title {
-      overflow: hidden;
-      color: var(--ink);
-      font-size: 12px;
-      font-weight: 600;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    :root[data-skin="bento"] .history-meta {
-      color: var(--faint);
-      font-size: 10px;
-      line-height: 1.6;
-    }
-
-    :root[data-skin="bento"] .history-actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    :root[data-skin="bento"] .history-actions .button {
-      min-height: 32px;
-      padding: 0 12px;
-      font-size: 11px;
-    }
-
-    :root[data-skin="bento"] .history-empty {
-      padding: 18px 4px;
-      color: var(--muted);
-      font-size: 12px;
-      text-align: center;
-    }
-
-    /* ------------------------- 序列帧面板 ------------------------- */
-
-    :root[data-skin="bento"] .sequence-panel {
-      margin-top: 26px;
-    }
-
-    :root[data-skin="bento"] .sequence-toolbar {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: end;
-      gap: 16px;
-      padding: 22px 26px;
-      border-bottom: 1px solid var(--card-divider);
-    }
-
-    :root[data-skin="bento"] .sequence-fields {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
-    }
-
-    :root[data-skin="bento"] .compact-field {
-      min-width: 0;
-    }
-
-    :root[data-skin="bento"] .compact-field .field-label {
-      margin-bottom: 7px;
-      font-size: 12px;
-    }
-
-    :root[data-skin="bento"] .compact-field input {
-      min-height: 42px;
-      font-size: 13px;
-    }
-
-    :root[data-skin="bento"] .sequence-actions {
-      display: flex;
-      align-items: flex-end;
-      gap: 9px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-
-    :root[data-skin="bento"] .sequence-summary {
-      padding: 15px 26px;
-      border-bottom: 1px solid var(--card-divider);
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.7;
-    }
-
-    :root[data-skin="bento"] .sequence-summary strong {
-      color: var(--ink);
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    :root[data-skin="bento"] .sequence-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-      gap: 16px;
-      max-height: 460px;
-      overflow: auto;
-      padding: 24px 26px;
-      scrollbar-color: var(--dark) var(--surface-lift);
-    }
-
-    :root[data-skin="bento"] .frame-card {
-      position: relative;
-      min-width: 0;
-      padding: 7px;
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-md);
-      color: var(--muted);
-      background: var(--surface-lift);
-      box-shadow: var(--nm-xs);
-      cursor: pointer;
-      transition: none;
-    }
-
-    :root[data-skin="bento"] .frame-card:hover {
-      background: var(--surface-lift);
-      border-color: var(--dark);
-      box-shadow: var(--nm-sm);
-    }
-
-    /* 保留：蓝色细边框标记选中 */
-    :root[data-skin="bento"] .frame-card.kept {
-      background: var(--surface-lift);
-      border-color: #3b82f6;
-      box-shadow: var(--nm-sm);
-    }
-
-    /* 剔除：仅靠透明度降级 + 不单独用颜色传达 */
-    :root[data-skin="bento"] .frame-card.excluded {
-      opacity: .5;
-      box-shadow: none;
-    }
-
-    /* 相似：琥珀色边框，与保留态的蓝可区分 */
-    :root[data-skin="bento"] .frame-card.similar {
-      border-color: #d97706;
-      box-shadow: var(--nm-xs);
-    }
-
-    :root[data-skin="bento"] .frame-card img {
-      display: block;
-      width: 100%;
-      aspect-ratio: 1 / 1;
-      border-radius: var(--r-sm);
-      background: var(--surface-well);
-      object-fit: contain;
-    }
-
-    :root[data-skin="bento"] .frame-number {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-      min-height: 24px;
-      padding: 5px 3px 1px;
-      color: var(--faint);
-      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-      font-size: 10px;
-    }
-
-    :root[data-skin="bento"] .frame-mark {
-      color: var(--teal-ink);
-      font-size: 11px;
-      font-weight: 600;
-    }
-
-    :root[data-skin="bento"] .frame-card.excluded .frame-mark {
-      color: var(--red-ink);
-    }
-
-    :root[data-skin="bento"] .sequence-empty {
-      display: grid;
-      justify-items: center;
-      gap: 10px;
-      min-height: 190px;
-      padding: 38px 26px;
-      color: var(--muted);
-      text-align: center;
-      font-size: 13px;
-      line-height: 1.8;
-    }
-
-    :root[data-skin="bento"] .sequence-empty strong {
-      color: var(--ink);
-      font-size: 15px;
-      font-weight: 600;
-    }
-
-    /* --------------------------- 预览台 --------------------------- */
-
-    :root[data-skin="bento"] .sequence-preview {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 260px;
-      gap: 20px;
-      padding: 24px 26px 26px;
-      border-top: 1px solid var(--card-divider);
-    }
-
-    :root[data-skin="bento"] .preview-stage {
-      position: relative;
-      display: grid;
-      place-items: center;
-      min-height: 250px;
-      overflow: hidden;
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-lg);
-      background:
-        linear-gradient(45deg, var(--checker) 25%, transparent 25%),
-        linear-gradient(-45deg, var(--checker) 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, var(--checker) 75%),
-        linear-gradient(-45deg, transparent 75%, var(--checker) 75%),
-        var(--stage-bg);
-      background-position: 0 0, 0 12px, 12px -12px, -12px 0;
-      background-size: 24px 24px;
-      box-shadow: none;
-    }
-
-    :root[data-skin="bento"] .preview-stage::after {
-      content: none;
-    }
-
-    :root[data-skin="bento"] #sequenceCanvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-      max-height: 380px;
-      border-radius: var(--r-md);
-      object-fit: contain;
-    }
-
-    :root[data-skin="bento"] .preview-side {
-      display: grid;
-      align-content: center;
-      gap: 14px;
-    }
-
-    :root[data-skin="bento"] .preview-title {
-      color: var(--ink);
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    :root[data-skin="bento"] .preview-meta {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.7;
-    }
-
-    :root[data-skin="bento"] .preview-controls {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    :root[data-skin="bento"] .preview-controls .button {
-      min-width: 40px;
-      min-height: 38px;
-      padding: 0 12px;
-      font-size: 13px;
-    }
-
-    :root[data-skin="bento"] .preview-fps {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 74px;
-      align-items: center;
-      gap: 12px;
-      color: var(--muted);
-      font-size: 11px;
-    }
-
-    :root[data-skin="bento"] .preview-fps input {
-      min-height: 36px;
-      padding: 0 10px;
-      font-size: 12px;
-    }
-
-    :root[data-skin="bento"] .sequence-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      padding: 18px 26px;
-      border-top: 1px solid var(--card-divider);
-      flex-wrap: wrap;
-    }
-
-    :root[data-skin="bento"] .sequence-rename {
-      display: grid;
-      grid-template-columns: minmax(160px, 260px) auto;
-      align-items: end;
-      gap: 12px;
-    }
-
-    :root[data-skin="bento"] .rename-preview {
-      overflow: hidden;
-      color: var(--faint);
-      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-      font-size: 11px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    :root[data-skin="bento"] .sequence-footer .button {
-      min-height: 40px;
-    }
-
-    :root[data-skin="bento"] .action-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    /* --------------------------- 结果区 --------------------------- */
-
-    :root[data-skin="bento"] .workspace {
-      min-width: 0;
-    }
-
-    :root[data-skin="bento"] .result-panel {
-      overflow: hidden;
-    }
-
-    :root[data-skin="bento"] .result-header {
-      align-items: center;
-    }
-
-    :root[data-skin="bento"] .result-state {
-      color: var(--yellow-ink);
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0;
-      text-transform: none;
-    }
-
-    :root[data-skin="bento"] .result-state.done {
-      color: var(--teal-ink);
-    }
-
-    :root[data-skin="bento"] .result-state.error {
-      color: var(--red-ink);
-    }
-
-    :root[data-skin="bento"] .video-stage {
-      position: relative;
-      display: grid;
-      place-items: center;
-      min-height: 560px;
-      padding: 28px;
-      border-top: 0;
-      background: var(--surface-lift);
-    }
-
-    :root[data-skin="bento"] .video-stage::after {
-      content: none;
-    }
-
-    :root[data-skin="bento"] video {
-      display: none;
-      width: 100%;
-      max-height: 660px;
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-lg);
-      background: var(--chrome);
-      box-shadow: var(--nm-md);
-      object-fit: contain;
-    }
-
-    :root[data-skin="bento"] video.visible {
-      display: block;
-    }
-
-    :root[data-skin="bento"] .video-empty {
-      display: grid;
-      justify-items: center;
-      gap: 14px;
-      padding: 36px;
-      color: var(--muted);
-      text-align: center;
-    }
-
-    :root[data-skin="bento"] .video-empty-mark {
-      display: grid;
-      place-items: center;
-      width: 84px;
-      height: 84px;
-      border: 1px solid var(--card-border);
-      border-radius: var(--r-lg);
-      color: var(--ink);
-      background: var(--surface-well);
-      box-shadow: var(--nm-xs);
-      font-size: 30px;
-      text-shadow: none;
-    }
-
-    :root[data-skin="bento"] .video-empty-title {
-      color: var(--ink);
-      font-size: 16px;
-      font-weight: 600;
-    }
-
-    :root[data-skin="bento"] .video-empty-copy {
-      max-width: 320px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.8;
-    }
-
-    /* --------------------------- 进度条 --------------------------- */
-
-    :root[data-skin="bento"] .progress-area {
-      padding: 20px 26px 24px;
-      border-top: 1px solid var(--card-divider);
-      background: var(--surface-lift);
-    }
-
-    :root[data-skin="bento"] .progress-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 11px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    :root[data-skin="bento"] .progress-track {
-      height: 16px;
-      overflow: hidden;
-      border: 1px solid var(--card-divider);
-      border-radius: var(--r-pill);
-      background: var(--surface-well);
-      box-shadow: var(--nm-in-sm);
-    }
-
-    :root[data-skin="bento"] .progress-fill {
-      width: 0;
-      height: 100%;
-      border-radius: var(--r-pill);
-      background: var(--ink);
-      box-shadow: none;
-      transition: none;
-    }
-
-    :root[data-skin="bento"] .result-actions {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      padding: 18px 26px;
-      border-top: 1px solid var(--card-divider);
-      flex-wrap: wrap;
-    }
-
-    :root[data-skin="bento"] .output-file {
-      min-width: 0;
-      overflow: hidden;
-      color: var(--faint);
-      font-size: 12px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    :root[data-skin="bento"] .result-buttons {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    /* --------------------------- 日志区 --------------------------- */
-
-    :root[data-skin="bento"] .log-panel {
-      margin-top: 22px;
-    }
-
-    :root[data-skin="bento"] .log-panel summary {
-      list-style: none;
-    }
-
-    :root[data-skin="bento"] .log-panel summary::-webkit-details-marker {
-      display: none;
-    }
-
-    :root[data-skin="bento"] .log-panel summary::after {
-      float: right;
-      color: var(--muted);
-      content: "+";
-      font-size: 16px;
-      font-weight: 400;
-    }
-
-    :root[data-skin="bento"] .log-panel[open] summary::after {
-      content: "−";
-    }
-
-    :root[data-skin="bento"] #log {
-      max-height: 200px;
-      overflow: auto;
-      margin-top: 14px;
-      padding: 16px;
-      border: 1px solid var(--card-divider);
-      border-radius: var(--r-md);
-      color: var(--ink-soft);
-      background: var(--surface-well);
-      box-shadow: none;
-      font-family: ui-monospace, "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
-      font-size: 11px;
-      line-height: 1.8;
-      white-space: pre-wrap;
-      scrollbar-color: var(--dark) var(--surface-well);
-    }
-
-    :root[data-skin="bento"] .footnote {
-      margin-top: 18px;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.7;
-    }
-
-    :root[data-skin="bento"] .hidden {
-      display: none !important;
-    }
-
-    :root[data-skin="bento"][data-theme="dark"] .preview-stage {
-      background:
-        linear-gradient(45deg, var(--checker) 25%, transparent 25%),
-        linear-gradient(-45deg, var(--checker) 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, var(--checker) 75%),
-        linear-gradient(-45deg, transparent 75%, var(--checker) 75%),
-        var(--stage-bg);
-      background-position: 0 0, 0 12px, 12px -12px, -12px 0;
-      background-size: 24px 24px;
     }
 
     /* ============================================================
@@ -3929,148 +2528,6 @@
       background-size: 24px 24px;
     }
 
-    /* ============================================================
-       皮肤三 · 现代渐变风 Modern Gradient
-       ============================================================ */
-
-    :root[data-skin="gradient"] {
-      color-scheme: dark;
-      --surface: #020617;
-      --surface-lift: rgba(255, 255, 255, .08);
-      --surface-well: rgba(255, 255, 255, .05);
-      --dark: rgba(255, 255, 255, .22);
-      --light: #ffffff;
-      --body-glow: radial-gradient(900px 520px at 12% -8%, rgba(139, 92, 246, .30), transparent 62%), radial-gradient(760px 460px at 88% 4%, rgba(217, 70, 239, .22), transparent 60%), radial-gradient(620px 420px at 60% 108%, rgba(34, 211, 238, .14), transparent 62%);
-      --panel-bg: rgba(255, 255, 255, .07);
-      --card-glass: rgba(255, 255, 255, .08);
-      --card-glass-border: rgba(255, 255, 255, .18);
-      --card-border: rgba(255, 255, 255, .18);
-      --card-divider: rgba(255, 255, 255, .12);
-      --ink: #ffffff;
-      --ink-soft: rgba(255, 255, 255, .72);
-      --muted: rgba(255, 255, 255, .62);
-      --faint: rgba(255, 255, 255, .62);
-      --accent: #8b5cf6;
-      --accent-deep: #a78bfa;
-      --accent-press-color: #7c3aed;
-      --accent-shadow: rgba(139, 92, 246, .45);
-      --accent-deep-shadow: rgba(217, 70, 239, .45);
-      --accent-press: inset 0 2px 6px rgba(0, 0, 0, .40);
-      --accent-trough: inset 0 1px 3px rgba(0, 0, 0, .45);
-      --accent-ink: #c4b5fd;
-      --on-accent: #ffffff;
-      --red: #fb7185;
-      --red-ink: #fda4af;
-      --red-shadow: rgba(251, 113, 133, .40);
-      --yellow: #fbbf24;
-      --yellow-ink: #fcd34d;
-      --yellow-shadow: rgba(251, 191, 36, .40);
-      --teal: #22d3ee;
-      --teal-ink: #67e8f9;
-      --teal-shadow: rgba(34, 211, 238, .40);
-      --control-bg: rgba(255, 255, 255, .08);
-      --field-bg: rgba(255, 255, 255, .08);
-      --field-border: rgba(255, 255, 255, .20);
-      --field-border-focus: rgba(139, 92, 246, .70);
-      --placeholder: rgba(255, 255, 255, .62);
-      --ring: rgba(139, 92, 246, .22);
-      --ring-focus: rgba(139, 92, 246, .38);
-      --divider: rgba(255, 255, 255, .14);
-      --divider-mid: rgba(255, 255, 255, .16);
-      --divider-strong: rgba(255, 255, 255, .22);
-      --chrome: #000000;
-      --stage-bg: rgba(255, 255, 255, .05);
-      --checker: rgba(255, 255, 255, .06);
-      --nm-xs: 0 1px 2px rgba(0, 0, 0, .40);
-      --nm-sm: 0 8px 24px rgba(0, 0, 0, .35);
-      --nm-md: 0 16px 40px rgba(0, 0, 0, .40);
-      --nm-lg: 0 24px 60px rgba(0, 0, 0, .45);
-      --nm-xl: 0 32px 80px rgba(139, 92, 246, .28);
-      --nm-deep: 0 24px 64px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .06);
-      --nm-in-xs: inset 0 1px 2px rgba(0, 0, 0, .35);
-      --nm-in-sm: inset 0 1px 2px rgba(0, 0, 0, .35);
-      --nm-in-md: inset 0 1px 3px rgba(0, 0, 0, .40);
-      --nm-in-lg: inset 0 2px 4px rgba(0, 0, 0, .45);
-      --r-sm: 10px;
-      --r-md: 16px;
-      --r-lg: 16px;
-      --r-xl: 24px;
-      --r-pill: 999px;
-      --shadow: none;
-      --motion-fast: 180ms;
-      --motion-card: 200ms;
-      --motion-ease: ease-out;
-    }
-
-    :root[data-skin="gradient"][data-theme="dark"] {
-      color-scheme: dark;
-      --surface: #1e1b4b;
-      --surface-lift: rgba(255, 255, 255, .08);
-      --surface-well: rgba(255, 255, 255, .05);
-      --dark: rgba(255, 255, 255, .22);
-      --light: #ffffff;
-      --body-glow: radial-gradient(900px 520px at 12% -8%, rgba(139, 92, 246, .22), transparent 62%), radial-gradient(760px 460px at 88% 4%, rgba(217, 70, 239, .16), transparent 60%);
-      --panel-bg: rgba(255, 255, 255, .05);
-      --card-glass: rgba(255, 255, 255, .06);
-      --card-glass-border: rgba(255, 255, 255, .18);
-      --card-border: rgba(255, 255, 255, .18);
-      --card-divider: rgba(255, 255, 255, .12);
-      --ink: #ffffff;
-      --ink-soft: rgba(255, 255, 255, .72);
-      --muted: rgba(255, 255, 255, .62);
-      --faint: rgba(255, 255, 255, .62);
-      --accent: #8b5cf6;
-      --accent-deep: #a78bfa;
-      --accent-press-color: #7c3aed;
-      --accent-shadow: rgba(139, 92, 246, .45);
-      --accent-deep-shadow: rgba(217, 70, 239, .45);
-      --accent-press: inset 0 2px 6px rgba(0, 0, 0, .40);
-      --accent-trough: inset 0 1px 3px rgba(0, 0, 0, .45);
-      --accent-ink: #c4b5fd;
-      --on-accent: #ffffff;
-      --red: #fb7185;
-      --red-ink: #fda4af;
-      --red-shadow: rgba(251, 113, 133, .40);
-      --yellow: #fbbf24;
-      --yellow-ink: #fcd34d;
-      --yellow-shadow: rgba(251, 191, 36, .40);
-      --teal: #22d3ee;
-      --teal-ink: #67e8f9;
-      --teal-shadow: rgba(34, 211, 238, .40);
-      --control-bg: rgba(255, 255, 255, .08);
-      --field-bg: rgba(255, 255, 255, .08);
-      --field-border: rgba(255, 255, 255, .20);
-      --field-border-focus: rgba(139, 92, 246, .70);
-      --placeholder: rgba(255, 255, 255, .62);
-      --ring: rgba(139, 92, 246, .22);
-      --ring-focus: rgba(139, 92, 246, .38);
-      --divider: rgba(255, 255, 255, .14);
-      --divider-mid: rgba(255, 255, 255, .16);
-      --divider-strong: rgba(255, 255, 255, .22);
-      --chrome: #000000;
-      --stage-bg: rgba(255, 255, 255, .05);
-      --checker: rgba(255, 255, 255, .06);
-      --nm-xs: 0 1px 2px rgba(0, 0, 0, .40);
-      --nm-sm: 0 8px 24px rgba(0, 0, 0, .35);
-      --nm-md: 0 16px 40px rgba(0, 0, 0, .40);
-      --nm-lg: 0 24px 60px rgba(0, 0, 0, .45);
-      --nm-xl: 0 32px 80px rgba(139, 92, 246, .28);
-      --nm-deep: 0 24px 64px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .06);
-      --nm-in-xs: inset 0 1px 2px rgba(0, 0, 0, .35);
-      --nm-in-sm: inset 0 1px 2px rgba(0, 0, 0, .35);
-      --nm-in-md: inset 0 1px 3px rgba(0, 0, 0, .40);
-      --nm-in-lg: inset 0 2px 4px rgba(0, 0, 0, .45);
-      --r-sm: 10px;
-      --r-md: 16px;
-      --r-lg: 16px;
-      --r-xl: 24px;
-      --r-pill: 999px;
-      --shadow: none;
-      --motion-fast: 180ms;
-      --motion-card: 200ms;
-      --motion-ease: ease-out;
-    }
-
     * {
       box-sizing: border-box;
     }
@@ -5186,121 +3643,6 @@
       display: none !important;
     }
 
-    /* 第三套专属：光晕底、玻璃面板、渐变按钮（沿用新拟物骨架 + 自身令牌覆盖）
-       位移与缩放由通用动效层提供；额外保留"渐变流动"（色带层错位）与"光晕变色"。 */
-    :root[data-skin="gradient"] body {
-      background: var(--body-glow), var(--surface);
-      background-attachment: fixed;
-    }
-
-    :root[data-skin="gradient"] .panel {
-      background: var(--panel-bg);
-      border: 1px solid var(--card-glass-border);
-      box-shadow: var(--nm-deep);
-      backdrop-filter: blur(20px) saturate(150%);
-      -webkit-backdrop-filter: blur(20px) saturate(150%);
-    }
-
-    :root[data-skin="gradient"] .preview-stage {
-      background:
-        linear-gradient(45deg, var(--checker) 25%, transparent 25%),
-        linear-gradient(-45deg, var(--checker) 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, var(--checker) 75%),
-        linear-gradient(-45deg, transparent 75%, var(--checker) 75%),
-        var(--stage-bg);
-      background-position: 0 0, 0 12px, 12px -12px, -12px 0;
-      background-size: 24px 24px;
-    }
-
-    :root[data-skin="gradient"] .button.primary {
-      background-image: linear-gradient(100deg, #6d28d9 0%, #7c3aed 26%, #a21caf 52%, #6d28d9 78%, #7c3aed 100%);
-      background-size: 220% 100%;
-      background-position: 0% 50%;
-      border-color: transparent;
-      box-shadow: 0 12px 34px rgba(124, 58, 237, .40);
-    }
-
-    :root[data-skin="gradient"] .button.primary:hover:not(:disabled) {
-      background-image: linear-gradient(100deg, #6d28d9 0%, #7c3aed 26%, #a21caf 52%, #6d28d9 78%, #7c3aed 100%);
-      background-size: 220% 100%;
-      background-position: 100% 50%;
-      border-color: transparent;
-      box-shadow: 0 16px 44px rgba(162, 28, 175, .50);
-    }
-
-    :root[data-skin="gradient"] .button.primary:active:not(:disabled) {
-      background-image: linear-gradient(100deg, #6d28d9 0%, #7c3aed 26%, #a21caf 52%, #6d28d9 78%, #7c3aed 100%);
-      background-size: 220% 100%;
-      background-position: 100% 50%;
-      box-shadow: var(--accent-press);
-    }
-
-    :root[data-skin="gradient"] .progress-fill {
-      background-image: linear-gradient(100deg, #6d28d9, #a21caf, #0e7490, #6d28d9);
-      background-size: 220% 100%;
-      background-position: 0% 50%;
-      border-color: transparent;
-      box-shadow: none;
-    }
-
-    :root[data-skin="gradient"] .button:hover:not(:disabled),
-    :root[data-skin="gradient"] .frame-card:hover,
-    :root[data-skin="gradient"] .history-item.active {
-      border-color: rgba(167, 139, 250, .55);
-    }
-
-    :root[data-skin="gradient"] .button:active:not(:disabled) {
-      border-color: rgba(167, 139, 250, .40);
-    }
-
-    :root[data-skin="gradient"] .status-dot {
-      background-image: linear-gradient(135deg, #a855f7, #22d3ee);
-    }
-
-
-    /* ============================================================
-       通用动效层（跨皮肤共用，放最后以稳定覆盖各皮肤骨架里的 transition/transform）
-       ============================================================ */
-
-    /* ============================================================
-       通用动效层（跨所有皮肤共用）
-       维度关系：data-skin（设计语言）× data-theme（亮暗）× 本层（交互动效）
-       规则只挂在类名上，与皮肤、亮暗正交。
-       时序参数走令牌，每套皮肤可各自覆盖：
-         --motion-fast   按钮/控件  150ms（Fluent 要求 <=200ms）
-         --motion-card   卡片       200ms
-         --motion-ease   ease-out
-
-       ⚠ 特异性（踩过的坑，务必保留 :root:root 双写）：
-       各皮肤骨架规则形如 :root[data-skin="bento"] .button:active... 特异性 (0,4,0)，
-       若本层只写 .button（0,1,0）或 :root .button（0,3,0）都会被压过 ——
-       表现为 transition 生效但 hover/active 的 transform 不生效。
-       双写 :root:root 提到 (0,4,0) 与骨架持平，再靠"本层在样式表最后"取胜。
-
-       位移/缩放（Fluent 的 Z 轴深度与触觉确认）：
-         卡片 hover  上浮 4px + 阴影扩张
-         按钮 hover  上浮 2px + 阴影扩张
-         按钮 active 缩小 0.97 + 压回原位 + 阴影收平
-         图标 hover  放大 1.05（挂在拖放区上）
-       无障碍：prefers-reduced-motion 下由媒体查询整体关闭。
-       ============================================================ */
-
-    :root:root .button,
-    :root:root .dropzone,
-    :root:root .frame-card,
-    :root:root .history-item,
-    :root:root input,
-    :root:root select,
-    :root:root textarea,
-    :root:root summary {
-      transition:
-        transform var(--motion-fast) var(--motion-ease),
-        box-shadow var(--motion-fast) var(--motion-ease),
-        background-color var(--motion-fast) var(--motion-ease),
-        border-color var(--motion-fast) var(--motion-ease),
-        color var(--motion-fast) var(--motion-ease);
-    }
-
     /* Reveal 高光 + Z 轴浮起 */
     :root:root .button:hover:not(:disabled) {
       transform: translateY(-2px);
@@ -5308,6 +3650,23 @@
 
     /* 触觉确认：按压缩小并压回原位 */
     :root:root .button:active:not(:disabled) {
+      transform: translateY(0) scale(.97);
+    }
+
+    /* 亮暗切换按钮同样走动效层（与 .button 一致的浮起/按压反馈） */
+    :root:root .theme-toggle {
+      transition:
+        transform var(--motion-card) var(--motion-ease),
+        box-shadow var(--motion-card) var(--motion-ease),
+        background-color var(--motion-card) var(--motion-ease),
+        color var(--motion-card) var(--motion-ease);
+    }
+
+    :root:root .theme-toggle:hover:not(:disabled) {
+      transform: translateY(-2px);
+    }
+
+    :root:root .theme-toggle:active:not(:disabled) {
       transform: translateY(0) scale(.97);
     }
 
@@ -5371,8 +3730,7 @@
     :root:root select:focus-visible,
     :root:root textarea:focus-visible,
     :root:root summary:focus-visible,
-    :root:root .skin-picker button:focus-visible,
-    :root:root .mode-switch button:focus-visible {
+    :root:root .theme-toggle:focus-visible {
       outline: none !important;
       box-shadow:
         0 0 0 2px var(--surface),
@@ -6263,14 +4621,130 @@
     }
 
 
-  </style>
+    /* __REF_CLIPBOARD_UPLOAD__
+       参考图区的两个小按钮：对齐无限画布的 size="small" 按钮款式
+       （浅色描边 + 抬升底色 + 图标与文字间距小）。
+       配色沿用上方那条既有约定：底色用 --surface-lift、字色用 --ink，不用弱化色。 */
+    .field-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+
+    .mini-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid var(--card-border);
+      border-radius: var(--r-md);
+      color: var(--ink);
+      background: var(--surface-lift);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: none;
+    }
+
+    .mini-button:hover:not(:disabled) {
+      color: var(--ink);
+      background: var(--surface);
+      border-color: var(--ink);
+    }
+
+    .mini-button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* 与其它按钮一致地加入动效层 */
+    :root:root .mini-button {
+      transition:
+        transform var(--motion-card) var(--motion-ease),
+        background-color var(--motion-card) var(--motion-ease),
+        border-color var(--motion-card) var(--motion-ease),
+        color var(--motion-card) var(--motion-ease);
+    }
+
+    :root:root .mini-button:hover:not(:disabled) {
+      transform: translateY(-2px);
+    }
+
+    :root:root .mini-button:active:not(:disabled) {
+      transform: translateY(0) scale(.97);
+    }    /* __HISTORY_CANVAS_STYLE_V4__
+       历史记录卡片 = 无限画布款式：纯扁平描边（去投影）、悬停淡染、选中淡蓝底、空态虚线框。
+       色值直接写死，对齐无限画布（它的 bg-blue-50 / bg-blue-950 同样是写死的 Tailwind 色）：
+         亮色选中 #eff6ff = blue-50，亮色悬停 #faf9f8；
+         暗色选中 #28404c（约等于 blue-950/20 压在暗底上的结果），暗色悬停 #252525。
+       不用 color-mix 的原因：实测无论百分比怎么调，读回的 backgroundColor 都带一个恒定 alpha，
+       两个不透明色混合本不该产生 alpha，说明还有一层没定位到的因素在参与 —— 写死色值最可预测。
+       令牌方面注意：fluent 只在**暗色**块里定义 --surface / --surface-lift，亮色下会拿到新拟物的值。 */
+    :root[data-skin="fluent"] .history-item {
+      padding: 10px 12px;
+      border: 1px solid var(--card-border);
+      border-radius: var(--r-md);
+      background: var(--card-glass);
+      box-shadow: none;
+      transition:
+        background-color var(--motion-card) var(--motion-ease),
+        border-color var(--motion-card) var(--motion-ease);
+    }
+
+    :root[data-skin="fluent"] .history-item:hover {
+      background: #faf9f8;
+    }
+
+    :root[data-skin="fluent"][data-theme="dark"] .history-item:hover {
+      background: #252525;
+    }
+
+    :root[data-skin="fluent"] .history-item.active {
+      border-color: var(--accent);
+      background: #eff6ff;
+      box-shadow: none;
+    }
+
+    :root[data-skin="fluent"][data-theme="dark"] .history-item.active {
+      border-color: var(--accent);
+      background: #28404c;
+      box-shadow: none;
+    }
+
+    /* 标题对齐无限画布的 text-sm font-semibold */
+    :root[data-skin="fluent"] .history-title {
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    /* 空态：无限画布是虚线圆角框 + 居中提示 */
+    :root[data-skin="fluent"] .history-empty {
+      display: grid;
+      place-items: center;
+      min-height: 132px;
+      padding: 16px;
+      border: 1px dashed var(--card-border);
+      border-radius: var(--r-md);
+      color: var(--ink-soft);
+      font-size: 12px;
+      line-height: 1.7;
+      text-align: center;
+    }
+
+</style>
+  <!-- __ONLY_FLUENT_SKIN__ 2026-09-17：只保留流利皮肤，删除 neu/bento/gradient（见 tools/h3ui/patch-h3ui-skins.js） -->
 </head>
 <body>
   <script>
     /* 主题引导：在首次绘制前同步应用皮肤与亮暗，避免切换时闪屏。
        data-skin = 设计语言（未设 = 新拟物），data-theme = 亮暗（未设 = 亮色） */
     (() => {
-      const SKINS = ["neu", "bento", "gradient", "fluent"];
+      const SKINS = ["fluent"];
       const root = document.documentElement;
       let skin = null;
       let theme = null;
@@ -6282,14 +4756,13 @@
         theme = null;
       }
       if (skin === null || SKINS.indexOf(skin) === -1) {
-        skin = "neu";
+        skin = "fluent";
       }
       if (theme !== "dark" && theme !== "light") {
         theme = "light";
       }
-      if (skin !== "neu") {
-        root.setAttribute("data-skin", skin);
-      }
+      // 只剩流利一种皮肤，恒定写上属性（与下方状态脚本保持一致）
+      root.setAttribute("data-skin", "fluent");
       if (theme === "dark") {
         root.setAttribute("data-theme", "dark");
       }
@@ -6308,16 +4781,8 @@
           <span id="connectionText">检查 ComfyUI</span>
         </div>
         <a class="button" id="workflowLink" href="#" target="_blank" rel="noopener">↗ 打开原始工作流</a>
-        <div class="mode-switch" id="modeSwitch" role="group" aria-label="亮色 / 暗夜模式">
-          <button type="button" id="modeLight" data-mode="light" aria-pressed="true" title="亮色模式">☀</button>
-          <button type="button" id="modeDark" data-mode="dark" aria-pressed="false" title="暗夜模式">☾</button>
-        </div>
-        <div class="skin-picker" id="skinPicker" role="radiogroup" aria-label="皮肤选择">
-          <button type="button" data-skin="neu" role="radio" aria-checked="true" title="新拟物派">新拟物</button>
-          <button type="button" data-skin="bento" role="radio" aria-checked="false" title="便当盒布局">便当盒</button>
-          <button type="button" data-skin="gradient" role="radio" aria-checked="false" title="现代渐变风">渐变</button>
-          <button type="button" data-skin="fluent" role="radio" aria-checked="false" title="流利设计">流利</button>
-        </div>
+        <!-- __THEME_TOGGLE_CANVAS_STYLE__ 单按钮：暗色显示太阳、亮色显示月亮（点它切到另一边） -->
+        <button type="button" class="theme-toggle" id="themeToggle" aria-label="切换到暗夜模式" title="切换到暗夜模式">☾</button>
       </div>
     </header>
 
@@ -6368,7 +4833,12 @@
           <div class="field">
             <div class="field-label">
               <span>参考图片</span>
-              <span class="field-hint">PNG / JPG / WebP</span>
+              <span class="field-actions">
+                <span class="field-hint">PNG / JPG / WebP</span>
+                <!-- __REF_CLIPBOARD_UPLOAD__ 与无限画布一致：左侧标题、右侧两个小按钮 -->
+                <button class="mini-button" id="pasteImageButton" type="button" title="从系统剪切板读取图片（需要浏览器授予剪切板权限）">⧉ 剪切板</button>
+                <button class="mini-button" id="uploadImageButton" type="button" title="从本地选择图片（等同点击下方的添加区域）">⬆ 上传</button>
+              </span>
             </div>
             <input class="hidden" id="imageInput" type="file" accept="image/png,image/jpeg,image/webp">
             <button class="dropzone" id="dropzone" type="button">
@@ -6993,6 +5463,8 @@
         imagePreview: document.getElementById("imagePreview"),
         imageName: document.getElementById("imageName"),
         clearImageButton: document.getElementById("clearImageButton"),
+        pasteImageButton: document.getElementById("pasteImageButton"),
+        uploadImageButton: document.getElementById("uploadImageButton"),
         promptText: document.getElementById("promptText"),
         aspectRatio: document.getElementById("aspectRatio"),
         megapixels: document.getElementById("megapixels"),
@@ -8866,6 +7338,32 @@
       els.workflowLink.href = WORKFLOW_URL;
       els.openComfyButton.addEventListener("click", () => window.open(WORKFLOW_URL, "_blank", "noopener"));
       els.dropzone.addEventListener("click", () => els.imageInput.click());
+      // 上传：直接复用同一个隐藏 input（与点击虚线框同一条路径）
+      els.uploadImageButton.addEventListener("click", () => els.imageInput.click());
+
+      // 剪切板：读系统剪切板里的图片，包成 File 后交给既有的 setFile()（校验/预览/状态复用同一套）
+      els.pasteImageButton.addEventListener("click", async () => {
+        if (!navigator.clipboard || typeof navigator.clipboard.read !== "function") {
+          log("当前浏览器不支持读取剪切板（Firefox 不支持），请改用「上传」或直接拖拽图片。");
+          return;
+        }
+        try {
+          const items = await navigator.clipboard.read();
+          for (const item of items) {
+            const type = (item.types || []).find((candidate) => candidate.indexOf("image/") === 0);
+            if (!type) continue;
+            const blob = await item.getType(type);
+            const ext = (type.split("/")[1] || "png").replace("jpeg", "jpg");
+            setFile(new File([blob], "clipboard." + ext, { type: blob.type || type }));
+            log("已从剪切板读取参考图片。");
+            return;
+          }
+          log("剪切板里没有图片。");
+        } catch (error) {
+          log("读取剪切板失败：" + (error && error.message ? error.message : error) + "（需要允许本页访问剪切板）。");
+        }
+      });
+
       els.imageInput.addEventListener("change", () => setFile(els.imageInput.files[0]));
       els.clearImageButton.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -9431,7 +7929,7 @@
     (() => {
       const SKIN_KEY = "minimax-h3-bridge-skin";
       const THEME_KEY = "minimax-h3-bridge-theme";
-      const SKIN_LABEL = { neu: "新拟物", bento: "便当盒", gradient: "渐变", fluent: "流利" };
+      const SKIN_LABEL = { fluent: "流利" };
       const root = document.documentElement;
 
       // 白名单归一化：加新皮肤时只需改上面两处常量，这里不必再动
@@ -9439,7 +7937,7 @@
       const readState = () => {
         const skinAttr = root.getAttribute("data-skin");
         return {
-          skin: SKIN_IDS.indexOf(skinAttr) >= 0 ? skinAttr : "neu",
+          skin: SKIN_IDS.indexOf(skinAttr) >= 0 ? skinAttr : "fluent",
           theme: root.getAttribute("data-theme") === "dark" ? "dark" : "light",
         };
       };
@@ -9453,11 +7951,8 @@
       };
 
       const apply = (state, persist) => {
-        if (state.skin === "neu") {
-          root.removeAttribute("data-skin");
-        } else {
-          root.setAttribute("data-skin", state.skin);
-        }
+        // 只剩流利一种皮肤，恒定写属性，避免"未设属性"时落到已删除的默认块上
+        root.setAttribute("data-skin", "fluent");
         // 默认皮肤（neu）不写属性，与引导脚本保持一致
         if (state.theme === "dark") {
           root.setAttribute("data-theme", "dark");
@@ -9465,14 +7960,6 @@
           root.removeAttribute("data-theme");
         }
 
-        document.querySelectorAll("#skinPicker button").forEach((el) => {
-          el.setAttribute("aria-checked", el.dataset.skin === state.skin ? "true" : "false");
-        });
-        document.querySelectorAll("#modeSwitch button").forEach((el) => {
-          const on = el.dataset.mode === state.theme;
-          el.setAttribute("aria-pressed", on ? "true" : "false");
-          el.setAttribute("title", (el.dataset.mode === "dark" ? "暗夜模式" : "亮色模式") + (on ? "（当前）" : ""));
-        });
         const toggle = document.getElementById("themeToggle");
         if (toggle) {
           const dark = state.theme === "dark";
@@ -9493,38 +7980,56 @@
         if (window.localStorage.getItem(SKIN_KEY) === null) {
           const legacy = window.localStorage.getItem(THEME_KEY);
           if (legacy === "dark" || legacy === "light") {
-            store(SKIN_KEY, "bento");
-            root.setAttribute("data-skin", "bento");
+            store(SKIN_KEY, "fluent");
+            root.setAttribute("data-skin", "fluent");
           }
         }
       } catch (error) {
         /* 忽略 */
       }
 
-      document.querySelectorAll("#skinPicker button").forEach((el) => {
-        el.addEventListener("click", () => {
-          const state = readState();
-          state.skin = el.dataset.skin;
-          apply(state, true);
-          el.blur();
-        });
-      });
 
-      document.querySelectorAll("#modeSwitch button").forEach((el) => {
-        el.addEventListener("click", () => {
-          const state = readState();
-          state.theme = el.dataset.mode;
-          apply(state, true);
-          el.blur();
-        });
-      });
 
       const toggleButton = document.getElementById("themeToggle");
       if (toggleButton) {
         toggleButton.addEventListener("click", () => {
-          const state = readState();
-          state.theme = state.theme === "dark" ? "light" : "dark";
-          apply(state, true);
+          const flip = () => {
+            const state = readState();
+            state.theme = state.theme === "dark" ? "light" : "dark";
+            apply(state, true);
+          };
+          const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          // 无限画布同款：新主题以圆形揭示从按钮中心扩散；不支持或要求减少动效时直接切换
+          if (reduceMotion || typeof document.startViewTransition !== "function") {
+            flip();
+            toggleButton.blur();
+            return;
+          }
+          const rect = toggleButton.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          const maxRadius = Math.hypot(Math.max(cx, vw - cx), Math.max(cy, vh - cy));
+          const root = document.documentElement;
+          root.dataset.themeVt = "active";
+          const transition = document.startViewTransition(flip);
+          const cleanup = () => {
+            delete root.dataset.themeVt;
+          };
+          if (transition && transition.finished && typeof transition.finished.finally === "function") {
+            transition.finished.finally(cleanup);
+          } else {
+            cleanup();
+          }
+          if (transition && transition.ready && typeof transition.ready.then === "function") {
+            transition.ready.then(() => {
+              root.animate(
+                { clipPath: ["circle(0px at " + cx + "px " + cy + "px)", "circle(" + maxRadius + "px at " + cx + "px " + cy + "px)"] },
+                { duration: 400, easing: "ease-in-out", fill: "forwards", pseudoElement: "::view-transition-new(root)" }
+              );
+            });
+          }
           toggleButton.blur();
         });
       }
