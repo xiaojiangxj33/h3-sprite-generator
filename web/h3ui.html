@@ -4736,6 +4736,42 @@
       text-align: center;
     }
 
+    /* __WORKFLOW_SWITCH__ 当前工作流不支持的控件：置灰并降低不透明度（禁用态不参与 WCAG 对比度要求） */
+    .field-disabled label,
+    .field-disabled .field-hint { opacity: .45; }
+
+    .field-disabled input:disabled,
+    .field-disabled select:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* __HISTORY_FIXES__ 历史记录列表滚动修复
+       .history-list 是 #historyDetails 的 flex 子项，flex 子项默认 min-height:auto，
+       于是它撑到内容全高、被父级 overflow:hidden 裁掉（实测列表 1690 / 容器 707），
+       滚轮只会滚整页。给它 min-height:0 就能收缩，再让自己滚动即可。 */
+    /* __HISTORY_SCROLL_V3__ 历史列表要能滚。
+       关键：项目里既有 `:root:root .app-grid > .left-col .history-list { max-height: none }`
+       特异性 (0,5,0)，把 fluent 的 320px 和更弱的选择器全压掉了 —— 所以这里必须用**同一条链**，
+       靠写在更后来取胜。只加 min-height:0 是没用的：<details> 的内容在 UA 影子插槽里，
+       flex 收缩对它不生效（实测列表仍按内容 1690px 走）。 */
+    :root:root .app-grid > .left-col .history-list {
+      min-height: 0;
+      max-height: min(58vh, 620px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+
+    /* __HISTORY_FIXES__ 生成总耗时标签（对齐画布「生图工作台」那个绿色小标签） */
+    .history-duration {
+      margin-right: auto;
+      align-self: center;
+      padding: 2px 9px;
+      border-radius: var(--r-pill);
+      color: var(--teal-ink);
+      background: var(--teal-shadow);
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
 </style>
   <!-- __ONLY_FLUENT_SKIN__ 2026-09-17：只保留流利皮肤，删除 neu/bento/gradient（见 tools/h3ui/patch-h3ui-skins.js） -->
 </head>
@@ -4830,6 +4866,17 @@
           </div>
         </div>
         <div class="panel-body">
+          <!-- __WORKFLOW_SWITCH__ 工作流选择：T8 = 自研节点图；官方 = 原生 MiniMax H3 节点图 -->
+          <div class="field">
+            <div class="field-label">
+              <label for="workflowSelect">工作流</label>
+              <span class="field-hint" id="workflowHint">T8 · 自研节点图，全部参数可用</span>
+            </div>
+            <select id="workflowSelect">
+              <option value="t8">T8 · 自研节点</option>
+              <option value="official">官方 · 原生 MiniMax H3</option>
+            </select>
+          </div>
           <div class="field">
             <div class="field-label">
               <span>参考图片</span>
@@ -5453,6 +5500,393 @@
           "_meta": { "title": "Video Combine" }
         }
       };
+
+      /* __WORKFLOW_SWITCH__ 官方（原生 MiniMax H3 节点图）· API 格式，由用户导出的工作流直接嵌入。
+         注意：这份图里**没有** ResolutionSelector / 音频条件节点，尺寸固定在两个地方
+         （节点 2 ImageScale 与节点 12 MiniMaxH3ImageToVideo 的 width/height，都是 512）。
+         它的模型是 fasth3_8step_v2（8 步蒸馏），所以界面上那四个控件对它无意义，见下方 UNSUPPORTED。 */
+      const workflowRawOfficial = {
+              "1": {
+                      "inputs": {
+                              "image": "PixPin_2026-09-20_10-55-21.png"
+                      },
+                      "class_type": "LoadImage",
+                      "_meta": {
+                              "title": "加载图像"
+                      }
+              },
+              "2": {
+                      "inputs": {
+                              "upscale_method": "nearest-exact",
+                              "width": 512,
+                              "height": 512,
+                              "crop": "disabled",
+                              "image": [
+                                      "1",
+                                      0
+                              ]
+                      },
+                      "class_type": "ImageScale",
+                      "_meta": {
+                              "title": "缩放图像"
+                      }
+              },
+              "3": {
+                      "inputs": {
+                              "value": 4
+                      },
+                      "class_type": "PrimitiveFloat",
+                      "_meta": {
+                              "title": "浮点数"
+                      }
+              },
+              "4": {
+                      "inputs": {
+                              "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+                              "values.a": [
+                                      "3",
+                                      0
+                              ]
+                      },
+                      "class_type": "ComfyMathExpression",
+                      "_meta": {
+                              "title": "数学表达式"
+                      }
+              },
+              "5": {
+                      "inputs": {
+                              "unet_name": "fastvideo_fasth3_8step_v2_pruned_int8_convrot(1).safetensors",
+                              "weight_dtype": "default"
+                      },
+                      "class_type": "UNETLoader",
+                      "_meta": {
+                              "title": "UNet加载器"
+                      }
+              },
+              "6": {
+                      "inputs": {
+                              "shift_video": 10,
+                              "shift_audio": 3,
+                              "model": [
+                                      "5",
+                                      0
+                              ]
+                      },
+                      "class_type": "MiniMaxH3SigmaShift",
+                      "_meta": {
+                              "title": "MiniMax H3 Sigma Shift"
+                      }
+              },
+              "7": {
+                      "inputs": {
+                              "attention": "comfy kitchen attention",
+                              "model": [
+                                      "6",
+                                      0
+                              ]
+                      },
+                      "class_type": "ModelAttentionBackend",
+                      "_meta": {
+                              "title": "ModelAttentionBackend"
+                      }
+              },
+              "8": {
+                      "inputs": {
+                              "selection": "vsa",
+                              "selection.keep_percent": 10,
+                              "start_percent": 0.2,
+                              "end_percent": 1,
+                              "dense_blocks": "",
+                              "min_tokens": 12288,
+                              "extra_tokens": 256,
+                              "sink_conditioning": "exact_kv_and_rows",
+                              "verbose": false,
+                              "model": [
+                                      "7",
+                                      0
+                              ]
+                      },
+                      "class_type": "BlockSparseAttention",
+                      "_meta": {
+                              "title": "Model Sparse Attention"
+                      }
+              },
+              "9": {
+                      "inputs": {
+                              "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+                              "type": "minimax",
+                              "device": "default"
+                      },
+                      "class_type": "CLIPLoader",
+                      "_meta": {
+                              "title": "加载CLIP"
+                      }
+              },
+              "10": {
+                      "inputs": {
+                              "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+                      },
+                      "class_type": "VAELoader",
+                      "_meta": {
+                              "title": "加载VAE"
+                      }
+              },
+              "11": {
+                      "inputs": {
+                              "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+                      },
+                      "class_type": "VAELoader",
+                      "_meta": {
+                              "title": "加载VAE"
+                      }
+              },
+              "12": {
+                      "inputs": {
+                              "prompt": "4 秒无缝循环动画，完整循环 2 次，单次循环周期 2 秒，游戏序列帧\n\nFor the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description: [Shot 1] 2D 平面插画风格，均匀单色背景，居中构图为 <Picture 1> 中那一缕上升的烟雾：整体呈自左下向右上蜿蜒升腾的流线形，左下端为收窄的尾端，向右上经过一段向内凹的细腰，在中部膨出一个饱满的球状团块，再向上延伸成一条细长并向右弯的烟柱，烟柱顶端为圆润的浅粉色球状头部；中部团块上另有一条细长的烟丝向右上方飘出；紫色区域内散布着细小的浅色光斑。颜色由左下的深紫与品红逐渐过渡到中部的亮粉紫，再到顶端近乎白的浅粉色。保持参考图中的整体走向、烟柱数量、渐变配色、平面插画质感与画面比例一致，不出现立体化、体积感、厚度、镜面高光或材质变化。\n\n底部锚定：画面左下端那个收窄的烟雾尾端在整个视频中位置固定不动，它始终停留在原处，是这一缕烟雾的固定锚点。整缕烟雾不发生整体位移、不旋转、不缩放，画布构图与背景始终固定不变。\n\n烟雾式翻滚涌动：整缕烟雾以流体般的柔和方式持续涌动，形状不断连续地变形、拉长、收窄、卷曲与舒展，如同被缓慢上升的热气流带动。中部的球状团块持续地鼓起与收缩，其外缘像被气流揉动一样起伏翻滚；向上的烟柱缓慢地左右蜿蜒、轻微扭转、时粗时细；顶端那个圆润的球状头部不断变形、缓慢地膨胀与收缩、边缘持续翻卷，并间歇性地向四周散出轻盈的烟絮，烟絮在飘出一小段距离后逐渐变淡并消失。中部向右上方飘出的那条细长烟丝随之轻柔地摇摆、拉伸与卷曲，末端渐渐散开。所有形变都柔和、缓慢、连续，像真实烟雾一样没有棱角、没有褶皱、没有清晰的边界线，各部分的形变节奏彼此不同、互不同步。\n\n这不是弹性摆动：烟雾不发生回弹式的往复摆动，不表现出发丝或布料的弹性甩动，而是以流体的方式持续变形；同时避免有规律的节拍感，使涌动显得自然、随机而不呆板。\n\n紫色区域的光斑闪烁：烟雾紫色区域内那些细小的浅色光斑，各自以不同节奏明灭闪烁，每个光斑在 2 秒内完成 1 至 2 次完整的由暗到亮、再由亮到暗的往复。它们在自己原有的位置上变亮、变暗、隐去、再重新出现，有的正处于亮起状态、有的正处于熄灭状态，形成错落有致的闪烁。光斑始终留在烟雾内部，不跑到轮廓之外，不聚集、不漂移、不拖尾，也不会变大到破坏烟雾轮廓；亮度变化柔和克制，不产生过曝或向外扩散的光晕。\n\n循环：整缕烟雾的形变与光斑的闪烁预先设计成闭环，在 2.00 秒时全部回到与 0.00 秒完全相同的形状、位置与明暗状态，因此末帧与首帧完全一致，可无缝循环。整个过程中画面里始终只有这一缕烟雾，不新增、不复制、不分裂、不熔断、不出现重影或拖影，不出现运动模糊，每一帧都保持清晰锐利，画面边缘不可见的出画部分不产生裁切感，背景始终保持均匀单色，不出现渐变、杂色或噪点。\n\noverall_soundscape: 极轻微的气流涌动声与低沉柔和的能量嗡鸣，音量随翻滚轻微起伏并构成一个 2 秒周期。\n\nnon_diegetic_music: N/A",
+                              "width": 512,
+                              "height": 512,
+                              "length": [
+                                      "4",
+                                      1
+                              ],
+                              "clip": [
+                                      "9",
+                                      0
+                              ],
+                              "vae": [
+                                      "10",
+                                      0
+                              ],
+                              "first_frame": [
+                                      "2",
+                                      0
+                              ],
+                              "last_frame": [
+                                      "2",
+                                      0
+                              ]
+                      },
+                      "class_type": "MiniMaxH3ImageToVideo",
+                      "_meta": {
+                              "title": "MiniMax H3 图像转视频"
+                      }
+              },
+              "13": {
+                      "inputs": {
+                              "model": [
+                                      "8",
+                                      0
+                              ],
+                              "conditioning": [
+                                      "12",
+                                      0
+                              ]
+                      },
+                      "class_type": "BasicGuider",
+                      "_meta": {
+                              "title": "基本引导器"
+                      }
+              },
+              "14": {
+                      "inputs": {
+                              "sampler_name": "res_multistep"
+                      },
+                      "class_type": "KSamplerSelect",
+                      "_meta": {
+                              "title": "K采样器选择"
+                      }
+              },
+              "15": {
+                      "inputs": {
+                              "scheduler": "simple",
+                              "steps": 8,
+                              "denoise": 1,
+                              "model": [
+                                      "8",
+                                      0
+                              ]
+                      },
+                      "class_type": "BasicScheduler",
+                      "_meta": {
+                              "title": "基本调度器"
+                      }
+              },
+              "16": {
+                      "inputs": {
+                              "noise_seed": 1
+                      },
+                      "class_type": "RandomNoise",
+                      "_meta": {
+                              "title": "随机噪波"
+                      }
+              },
+              "17": {
+                      "inputs": {
+                              "noise": [
+                                      "16",
+                                      0
+                              ],
+                              "guider": [
+                                      "13",
+                                      0
+                              ],
+                              "sampler": [
+                                      "14",
+                                      0
+                              ],
+                              "sigmas": [
+                                      "15",
+                                      0
+                              ],
+                              "latent_image": [
+                                      "12",
+                                      1
+                              ]
+                      },
+                      "class_type": "SamplerCustomAdvanced",
+                      "_meta": {
+                              "title": "自定义采样器（高级）"
+                      }
+              },
+              "18": {
+                      "inputs": {
+                              "samples": [
+                                      "17",
+                                      0
+                              ],
+                              "vae": [
+                                      "10",
+                                      0
+                              ]
+                      },
+                      "class_type": "VAEDecode",
+                      "_meta": {
+                              "title": "VAE解码"
+                      }
+              },
+              "19": {
+                      "inputs": {
+                              "samples": [
+                                      "17",
+                                      0
+                              ],
+                              "vae": [
+                                      "11",
+                                      0
+                              ]
+                      },
+                      "class_type": "VAEDecodeAudio",
+                      "_meta": {
+                              "title": "VAE解码（音频）"
+                      }
+              },
+              "20": {
+                      "inputs": {
+                              "fps": 24,
+                              "bit_depth": "auto",
+                              "color_space": "sRGB",
+                              "images": [
+                                      "18",
+                                      0
+                              ],
+                              "audio": [
+                                      "19",
+                                      0
+                              ]
+                      },
+                      "class_type": "CreateVideo",
+                      "_meta": {
+                              "title": "创建视频"
+                      }
+              },
+              "21": {
+                      "inputs": {
+                              "filename_prefix": "fasth3_512_loop",
+                              "format": "auto",
+                              "format.codec": "h264",
+                              "format.codec.encoding": "auto",
+                              "codec": "auto",
+                              "video-preview": "",
+                              "video": [
+                                      "20",
+                                      0
+                              ]
+                      },
+                      "class_type": "SaveVideo",
+                      "_meta": {
+                              "title": "保存视频"
+                      }
+              }
+      };
+
+      /* 可切换的工作流。key 会存进设置里。 */
+      const WORKFLOWS = {
+        t8: { label: "T8", raw: workflowRaw },
+        official: { label: "官方", raw: workflowRawOfficial }
+      };
+
+      /* 界面控件 → 节点图中「哪个节点的哪个输入」。两套图必须各写一份。 */
+      const WORKFLOW_FIELD_MAP = {
+        t8: {
+          image: ["1", "image"],
+          aspect: ["2", "aspect_ratio"],
+          megapixels: ["2", "megapixels"],
+          duration: ["3", "value"],
+          expression: ["4", "values.a"],
+          prompt: ["5", "value"],
+          seed: ["41", "noise_seed"],
+          steps: ["42", "video_steps"],
+          audioMode: ["30", "audio_mode"],
+          frameRate: ["60", "frame_rate"],
+          crf: ["60", "crf"],
+          prefix: ["60", "filename_prefix"]
+        },
+        official: {
+          image: ["1", "image"],
+          duration: ["3", "value"],
+          expression: ["4", "values.a"],
+          prompt: ["12", "prompt"],           // 提示词在这份图里属于 ImageToVideo 节点
+          seed: ["16", "noise_seed"],
+          steps: ["15", "steps"],
+          frameRate: ["20", "fps"],
+          prefix: ["21", "filename_prefix"]
+        }
+      };
+
+      /* 当前工作流不支持的界面控件：置灰 + 在提示里说明，不静默忽略改动。 */
+      const WORKFLOW_UNSUPPORTED = {
+        t8: [],
+        official: ["aspectRatio", "megapixels", "audioMode", "crf"]
+      };
+
+      const WORKFLOW_HINT = {
+        t8: "T8 · 自研节点图，全部参数可用",
+        official: "官方 · 原生 MiniMax H3 节点图，固定 512×512"
+      };
+
+      let activeWorkflow = "t8";
+
+      /* 按当前工作流把界面状态同步到"四个控件能不能用"。 */
+      function applyWorkflowUI() {
+        const off = WORKFLOW_UNSUPPORTED[activeWorkflow] || [];
+        ["aspectRatio", "megapixels", "audioMode", "crf"].forEach((key) => {
+          const el = els[key];
+          if (!el) { return; }
+          const disabled = off.indexOf(key) >= 0;
+          el.disabled = disabled;
+          el.setAttribute("aria-disabled", disabled ? "true" : "false");
+          const box = el.closest(".field") || el.closest("div");
+          if (box) { box.classList.toggle("field-disabled", disabled); }
+        });
+        if (els.workflowHint) { els.workflowHint.textContent = WORKFLOW_HINT[activeWorkflow] || ""; }
+      }
+
+      function setActiveWorkflow(id, persist) {
+        activeWorkflow = WORKFLOWS[id] ? id : "t8";
+        if (els.workflowSelect) { els.workflowSelect.value = activeWorkflow; }
+        applyWorkflowUI();
+        if (persist) { saveSettings(); }
+      }
 
       const els = {
         connectionStatus: document.getElementById("connectionStatus"),
@@ -5465,6 +5899,8 @@
         clearImageButton: document.getElementById("clearImageButton"),
         pasteImageButton: document.getElementById("pasteImageButton"),
         uploadImageButton: document.getElementById("uploadImageButton"),
+        workflowSelect: document.getElementById("workflowSelect"),
+        workflowHint: document.getElementById("workflowHint"),
         promptText: document.getElementById("promptText"),
         aspectRatio: document.getElementById("aspectRatio"),
         megapixels: document.getElementById("megapixels"),
@@ -5632,6 +6068,25 @@
         els.dropzone.classList.add("has-image");
       }
 
+      /* __HISTORY_FIXES__ 把历史记录里的参考图还原回来。
+         本地 File 对象没法存进历史记录，但生成时那张图已经上传到 ComfyUI 的 input 目录，
+         记录里存了 uploadedImageName，从 /view 取回来即可。 */
+      async function restoreReferenceImage(record) {
+        const name = (record && record.uploadedImageName) || "";
+        if (!name) { return; }
+        try {
+          const url = `${COMFY_URL}/view?filename=${encodeURIComponent(name)}&type=input`;
+          const response = await fetch(url, { cache: "no-store" });
+          if (!response.ok) { throw new Error("HTTP " + response.status); }
+          const blob = await response.blob();
+          if (!blob || !blob.size) { throw new Error("空文件"); }
+          setFile(new File([blob], record.referenceFile || name, { type: blob.type || "image/png" }));
+          log(`已还原参考图：${record.referenceFile || name}`);
+        } catch (error) {
+          log(`参考图还原失败（ComfyUI 的 input 目录里可能已清理）：${error.message}`);
+        }
+      }
+
       function clearFile() {
         if (previewUrl) {
           URL.revokeObjectURL(previewUrl);
@@ -5675,25 +6130,37 @@
         els.renamePreview.textContent = getFrameName(1);
       }
 
+      /* 按当前工作流把界面值填进节点图。
+         两套图的节点 id 与输入名都不同，所以一律查 WORKFLOW_FIELD_MAP，
+         不要在这里写死节点号 —— 否则加第三套图时必然漏改。
+         当前图没有的输入（map 里没有的 key）直接跳过：对应控件已被置灰并在提示里说明。 */
       function createPrompt(fileName) {
-        const prompt = JSON.parse(JSON.stringify(workflowRaw));
+        const spec = WORKFLOWS[activeWorkflow] || WORKFLOWS.t8;
+        const map = WORKFLOW_FIELD_MAP[activeWorkflow] || WORKFLOW_FIELD_MAP.t8;
+        const prompt = JSON.parse(JSON.stringify(spec.raw));
         const duration = getNumber(els.duration, 4);
         const seed = els.randomSeed.checked
           ? Math.floor(Math.random() * 4294967295)
           : Math.max(0, Math.floor(getNumber(els.seed, 123456789)));
 
-        prompt[IMAGE_INPUT_NODE_ID].inputs.image = fileName;
-        prompt[RESOLUTION_NODE_ID].inputs.aspect_ratio = els.aspectRatio.value;
-        prompt[RESOLUTION_NODE_ID].inputs.megapixels = getNumber(els.megapixels, 0.4);
-        prompt[DURATION_NODE_ID].inputs.value = duration;
-        prompt[EXPRESSION_NODE_ID].inputs["values.a"] = [DURATION_NODE_ID, 0];
-        prompt[PROMPT_NODE_ID].inputs.value = els.promptText.value.trim();
-        prompt[SEED_NODE_ID].inputs.noise_seed = seed;
-        prompt[SAMPLER_NODE_ID].inputs.video_steps = Math.max(1, Math.floor(getNumber(els.videoSteps, 8)));
-        prompt["30"].inputs.audio_mode = els.audioMode.value;
-        prompt["60"].inputs.frame_rate = Math.max(1, Math.floor(getNumber(els.frameRate, 24)));
-        prompt["60"].inputs.crf = Math.max(0, Math.floor(getNumber(els.crf, 19)));
-        prompt["60"].inputs.filename_prefix = safePrefix(els.filenamePrefix.value);
+        const set = (slot, value) => {
+          const field = map[slot];
+          if (!field) { return; }
+          prompt[field[0]].inputs[field[1]] = value;
+        };
+
+        set("image", fileName);
+        set("aspect", els.aspectRatio.value);
+        set("megapixels", getNumber(els.megapixels, 0.4));
+        set("duration", duration);
+        set("expression", [map.duration[0], 0]);   // 表达式取时长节点的输出
+        set("prompt", els.promptText.value.trim());
+        set("seed", seed);
+        set("steps", Math.max(1, Math.floor(getNumber(els.videoSteps, 8))));
+        set("audioMode", els.audioMode.value);
+        set("frameRate", Math.max(1, Math.floor(getNumber(els.frameRate, 24))));
+        set("crf", Math.max(0, Math.floor(getNumber(els.crf, 19))));
+        set("prefix", safePrefix(els.filenamePrefix.value));
         return { prompt, seed };
       }
 
@@ -5890,6 +6357,7 @@
       function getSettingsSnapshot(actualSeed = null) {
         return {
           prompt: els.promptText.value,
+          workflow: activeWorkflow,
           aspectRatio: els.aspectRatio.value,
           megapixels: els.megapixels.value,
           duration: els.duration.value,
@@ -5923,6 +6391,7 @@
           return;
         }
         els.promptText.value = data.prompt || DEFAULT_PROMPT;
+        setActiveWorkflow(data.workflow, false);
         if (data.aspectRatio) els.aspectRatio.value = data.aspectRatio;
         if (data.megapixels) els.megapixels.value = data.megapixels;
         if (data.duration) els.duration.value = data.duration;
@@ -5972,18 +6441,25 @@
         localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records.slice(0, HISTORY_LIMIT)));
       }
 
+      /* __HISTORY_TIME_V2__ 时间戳显示得简单明了：
+         今天 / 昨天 / 前天 + 时:分；同年更早的用 月/日 时:分；跨年的带上年份。
+         原来的 09/18 16:59 没有年份也没有相对锚点，读起来费劲。 */
       function formatHistoryTime(value) {
         const date = new Date(value);
         if (Number.isNaN(date.getTime())) {
           return "未知时间";
         }
-        return date.toLocaleString("zh-CN", {
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false
-        });
+        const hm = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+        const now = new Date();
+        const dayStart = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const days = Math.round((dayStart(now) - dayStart(date)) / 86400000);
+        if (days === 0) { return "今天 " + hm; }
+        if (days === 1) { return "昨天 " + hm; }
+        if (days === 2) { return "前天 " + hm; }
+        if (date.getFullYear() === now.getFullYear()) {
+          return (date.getMonth() + 1) + "/" + date.getDate() + " " + hm;
+        }
+        return date.getFullYear() + "/" + (date.getMonth() + 1) + "/" + date.getDate();
       }
 
       function renderHistory() {
@@ -6023,6 +6499,15 @@
           const actions = document.createElement("div");
           actions.className = "history-actions";
 
+          // __HISTORY_FIXES__ 生成总耗时（画布「生图工作台」同款小标签）
+          const durationText = formatGenerationDuration(record.durationMs);
+          if (durationText) {
+            const durationEl = document.createElement("span");
+            durationEl.className = "history-duration";
+            durationEl.textContent = durationText;
+            actions.appendChild(durationEl);
+          }
+
           const restoreButton = document.createElement("button");
           restoreButton.className = "button";
           restoreButton.type = "button";
@@ -6042,7 +6527,19 @@
         els.historyList.appendChild(fragment);
       }
 
-      function saveGenerationHistory({ videoItem, videoUrl, seed, imageName, prompt }) {
+      /* __HISTORY_FIXES__ 本次生成从「点开始生成」到「完成」的总耗时（毫秒）。0 表示没记到。 */
+      let generationStartedAt = 0;
+
+      /* 总耗时显示成「83 秒」/「1 分 23 秒」。 */
+      function formatGenerationDuration(ms) {
+        const total = Math.max(0, Math.round((ms || 0) / 1000));
+        if (!total) { return ""; }
+        const minutes = Math.floor(total / 60);
+        const seconds = total % 60;
+        return minutes ? `${minutes} 分 ${String(seconds).padStart(2, "0")} 秒` : `${total} 秒`;
+      }
+
+      function saveGenerationHistory({ videoItem, videoUrl, seed, imageName, prompt, durationMs }) {
         try {
           const record = {
             id: makeHistoryId(),
@@ -6055,6 +6552,7 @@
             },
             outputUrl: videoUrl,
             referenceFile: selectedFile ? selectedFile.name : "",
+            durationMs: durationMs || 0,
             uploadedImageName: imageName,
             seed,
             settings: getSettingsSnapshot(seed),
@@ -6092,6 +6590,7 @@
         // 由下面的 clearSequence → updateSequenceStatus 统一决定。
         setSequenceInputsEnabled(true);
         clearSequence(true);
+        restoreReferenceImage(record);
         setProgress(100, "已恢复历史视频");
         setResultState("done", "历史记录");
         renderHistory();
@@ -7008,6 +7507,7 @@
           return;
         }
 
+        generationStartedAt = Date.now();   // __HISTORY_FIXES__ 记开始时间，用于算总耗时
         isRunning = true;
         els.runButton.disabled = true;
         els.downloadButton.disabled = true;
@@ -7074,7 +7574,8 @@
             videoUrl: outputUrl,
             seed,
             imageName,
-            prompt
+            prompt,
+            durationMs: generationStartedAt ? Date.now() - generationStartedAt : 0
           });
         } catch (error) {
           setResultState("error", "任务失败");
@@ -7414,6 +7915,7 @@
         els.sequencePingPong,
         els.frameBaseName
       ].forEach((input) => input.addEventListener("change", saveSettings));
+      els.workflowSelect.addEventListener("change", () => setActiveWorkflow(els.workflowSelect.value, true));
       els.promptText.addEventListener("input", saveSettings);
       els.frameBaseName.addEventListener("input", () => {
         updateRenamePreview();
@@ -7916,6 +8418,7 @@
         toggleSequencePreview();
       });
       loadSettings();
+      applyWorkflowUI();
       renderHistory();
       clearSequence(false);
       checkConnection();
