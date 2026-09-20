@@ -5821,8 +5821,8 @@
 
       /* 可切换的工作流。key 会存进设置里。 */
       const WORKFLOWS = {
-        t8: { label: "T8", raw: workflowRaw },
-        official: { label: "官方", raw: workflowRawOfficial }
+        t8: { label: "T8", raw: workflowRaw, outputNode: "60" },          // VHS_VideoCombine
+        official: { label: "官方", raw: workflowRawOfficial, outputNode: "21" }   // SaveVideo
       };
 
       /* 界面控件 → 节点图中「哪个节点的哪个输入」。两套图必须各写一份。 */
@@ -6332,15 +6332,19 @@
         throw new Error("等待任务超时，请到 ComfyUI 查看队列。");
       }
 
+      /* __OUTPUT_NODE_PER_WORKFLOW__ 输出节点随工作流变：T8 是 60(VHS_VideoCombine)，官方是 21(SaveVideo)；
+         两种节点的 history 输出结构也不同 —— 官方的 mp4 在 images 里，不在 gifs/videos/files。 */
       function getVideoItem(history) {
-        const nodeOutput = history.outputs && history.outputs[OUTPUT_VIDEO_NODE_ID];
+        const spec = WORKFLOWS[activeWorkflow] || WORKFLOWS.t8;
+        const nodeOutput = history.outputs && history.outputs[spec.outputNode];
         if (!nodeOutput) {
           return null;
         }
         const candidates = [
           ...(nodeOutput.gifs || []),
           ...(nodeOutput.videos || []),
-          ...(nodeOutput.files || [])
+          ...(nodeOutput.files || []),
+          ...(nodeOutput.images || [])
         ];
         return candidates.find((item) => item && item.filename) || null;
       }
@@ -7554,7 +7558,11 @@
           const history = await waitForHistory(activePromptId);
           const videoItem = getVideoItem(history);
           if (!videoItem) {
-            throw new Error("未读取到 Video Combine 输出视频");
+            /* __OUTPUT_ERROR_TEXT__ 别写死 "Video Combine"（那是 T8 的节点名）：
+               按当前工作流报出实际期望的输出节点，下次出问题一眼能对上。 */
+            const spec = WORKFLOWS[activeWorkflow] || WORKFLOWS.t8;
+            const outKeys = Object.keys(history.outputs || {});
+            throw new Error(`未读取到输出视频：工作流「${spec.label}」期望输出节点 ${spec.outputNode}，但 history 里只有节点 [${outKeys.join(", ") || "无"}]`);
           }
 
           outputUrl = getViewUrl(videoItem);
