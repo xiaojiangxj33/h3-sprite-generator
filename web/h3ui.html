@@ -4794,6 +4794,28 @@
       white-space: nowrap;
     }
 
+    /* __SILHOUETTE_MOVE__ 与「导出 PNG ZIP / 发送选中帧到 Eagle」同一行的勾选项。
+       不复用 .check-row：它 min-height:44px，放进 flex 行里比按钮高一截。 */
+    .silhouette-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 9px;          /* 与同行按钮的垂直中心大致对齐 */
+      color: var(--ink-soft);
+      font-size: 13px;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .silhouette-toggle input {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--accent);   /* 与 .check-row 的复选框同款 */
+      cursor: pointer;
+    }
+
 </style>
   <!-- __ONLY_FLUENT_SKIN__ 2026-09-17：只保留流利皮肤，删除 neu/bento/gradient（见 tools/h3ui/patch-h3ui-skins.js） -->
 </head>
@@ -5334,6 +5356,11 @@
             <div class="sequence-actions">
               <button class="button" id="exportFramesButton" type="button" disabled>↓ 导出 PNG ZIP</button>
               <button class="button" id="sendSelectedEagleButton" type="button" disabled>⇧ 发送选中帧到 Eagle</button>
+              <!-- __SILHOUETTE_MOVE__ 用户指定位置：与上面两个按钮同一行 -->
+              <label class="silhouette-toggle" title="发送到 Eagle 前，额外把所有帧合并成一张黑色剪影（编号 0000）">
+                <input id="eagleSilhouette" type="checkbox" checked>
+                <span>导出剪影</span>
+              </label>
             </div>
           </div>
         </section>
@@ -5528,7 +5555,7 @@
           "_meta": { "title": "Video Combine" }
         }
       };
-
+
       /* __WORKFLOW_SWITCH__ 官方（原生 MiniMax H3 节点图）· API 格式，由用户导出的工作流直接嵌入。
          注意：这份图里**没有** ResolutionSelector / 音频条件节点，尺寸固定在两个地方
          （节点 2 ImageScale 与节点 12 MiniMaxH3ImageToVideo 的 width/height，都是 512）。
@@ -5948,6 +5975,7 @@
         eagleFormat: document.getElementById("eagleFormat"),
         eagleCompression: document.getElementById("eagleCompression"),
         eagleLossless: document.getElementById("eagleLossless"),
+        eagleSilhouette: document.getElementById("eagleSilhouette"),
         eagleTags: document.getElementById("eagleTags"),
         eagleFilename: document.getElementById("eagleFilename"),
         eagleFolder: document.getElementById("eagleFolder"),
@@ -6433,6 +6461,7 @@
           eagleFormat: els.eagleFormat.value,
           eagleCompression: els.eagleCompression.value,
           eagleLossless: els.eagleLossless.checked,
+          eagleSilhouette: els.eagleSilhouette.checked,   // __EAGLE_SILHOUETTE_OPT__ 用户的选择要记住
           eagleTags: els.eagleTags.value,
           eagleFilename: els.eagleFilename.value,
           eagleFolder: els.eagleFolder.value,
@@ -6467,6 +6496,7 @@
         if (data.eagleFormat) els.eagleFormat.value = data.eagleFormat;
         if (data.eagleCompression) els.eagleCompression.value = data.eagleCompression;
         if (typeof data.eagleLossless === "boolean") els.eagleLossless.checked = data.eagleLossless;
+        if (typeof data.eagleSilhouette === "boolean") els.eagleSilhouette.checked = data.eagleSilhouette;
         if (data.eagleTags) els.eagleTags.value = data.eagleTags;
         if (data.eagleFilename) els.eagleFilename.value = data.eagleFilename;
         if (data.eagleFolder) els.eagleFolder.value = data.eagleFolder;
@@ -7803,6 +7833,34 @@
       }
 
       /* 两个按钮共用这一份，只有"取哪些帧"不同 */
+      /* __EAGLE_SILHOUETTE__ 把这一批导出帧合并成一张纯黑剪影（编号 0000）。
+         输入 = buildOutputFrames 的产物，等于和导出帧走同一套抠图/裁剪，位置天然对齐。
+         lighter 叠 alpha 得到"整段动画覆盖的范围"，再用 source-in 统一刷黑。 */
+      async function buildSilhouetteFrame(frames) {
+        if (!frames || !frames.length) { return null; }
+        const bitmaps = [];
+        let width = 0;
+        let height = 0;
+        for (const item of frames) {
+          const bitmap = await createImageBitmap(item.blob);
+          bitmaps.push(bitmap);
+          width = Math.max(width, bitmap.width);
+          height = Math.max(height, bitmap.height);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.globalCompositeOperation = "lighter";
+        for (const bitmap of bitmaps) { ctx.drawImage(bitmap, 0, 0); }
+        ctx.globalCompositeOperation = "source-in";
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, width, height);
+        ctx.globalCompositeOperation = "source-over";
+        for (const bitmap of bitmaps) { if (bitmap.close) { bitmap.close(); } }
+        return { name: `${getFrameBaseName()}_0000`, blob: await canvasToPngBlob(canvas), width: width, height: height };
+      }
+
       async function runEagleSend(sourceFrames, what) {
         if (isRunning) { return; }
         if (!getKeptFrames().length) {
@@ -7825,6 +7883,19 @@
           const keyedNow = maskActive();
           const cropNow = getCropRect();
           const frames = await buildOutputFrames(sourceFrames);
+          try {
+            // __EAGLE_SILHOUETTE__ 额外合并一张剪影（0000），放在最前面一起发
+            // __EAGLE_SILHOUETTE_OPT__ 只有勾选了「导出剪影」才合并
+            const wantSilhouette = !els.eagleSilhouette || els.eagleSilhouette.checked;
+            const silhouette = wantSilhouette ? await buildSilhouetteFrame(frames) : null;
+            if (silhouette) {
+              frames.unshift(silhouette);
+              log(`已额外合并 1 张剪影：${silhouette.name}.png（${silhouette.width}×${silhouette.height}，覆盖这 ${frames.length - 1} 帧的轮廓）。`);
+            }
+          } catch (error) {
+            // 剪影只是附赠产物，合并失败不该把整批发送搞挂
+            log(`剪影合并失败，本次不含剪影：${error.message}`);
+          }
           log("已按「" + what + "」取出 " + frames.length + " 张（"
             + (keyedNow ? "已应用抠图，透明背景" : "未抠图，不透明")
             + (cropNow ? "，已裁剪 " + cropNow.w + "×" + cropNow.h : "")
@@ -7891,6 +7962,7 @@
         els.eagleFormat.value = "png";
         els.eagleCompression.value = "90";
         els.eagleLossless.checked = true;
+        els.eagleSilhouette.checked = true;   // __EAGLE_SILHOUETTE_OPT__ 默认导出剪影
         els.eagleTags.value = "None";
         els.eagleFilename.value = "fire_{seed}";
         els.eagleFolder.value = "序列帧做1";
@@ -7998,6 +8070,7 @@
         els.eagleFormat,
         els.eagleCompression,
         els.eagleLossless,
+        els.eagleSilhouette,
         els.eagleTags,
         els.eagleFilename,
         els.eagleFolder,
