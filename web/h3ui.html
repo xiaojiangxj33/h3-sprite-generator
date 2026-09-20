@@ -4967,7 +4967,7 @@
           </div>
 
           <label class="check-row">
-            <input id="randomSeed" type="checkbox">
+            <input id="randomSeed" type="checkbox" checked>   <!-- __SEED_PREF__ 默认随机：不主动取消就一直随机 -->
             <span>每次生成使用随机种子</span>
           </label>
 
@@ -5504,7 +5504,7 @@
           "_meta": { "title": "Video Combine" }
         }
       };
-
+
       /* __WORKFLOW_SWITCH__ 官方（原生 MiniMax H3 节点图）· API 格式，由用户导出的工作流直接嵌入。
          注意：这份图里**没有** ResolutionSelector / 音频条件节点，尺寸固定在两个地方
          （节点 2 ImageScale 与节点 12 MiniMaxH3ImageToVideo 的 width/height，都是 512）。
@@ -6372,7 +6372,9 @@
           duration: els.duration.value,
           videoSteps: els.videoSteps.value,
           seed: actualSeed === null ? els.seed.value : String(actualSeed),
-          randomSeed: actualSeed === null ? els.randomSeed.checked : false,
+          // __SEED_PREF__ 一律存勾选状态本身。原来生成完成后会被写成 false，
+          // 导致"用过一次随机种子"这件事把用户的偏好给覆盖掉了。
+          randomSeed: els.randomSeed.checked,
           filenamePrefix: els.filenamePrefix.value,
           frameRate: els.frameRate.value,
           crf: els.crf.value,
@@ -6587,7 +6589,13 @@
         }
 
         activeHistoryId = record.id;
-        applySettingsSnapshot(record.settings || {}, true);
+        /* __SEED_PREF_RESTORE__ 随机种子开关是用户偏好，不跟着记录走；
+           这里先不落盘，把开关拨回来后再统一 saveSettings()，
+           否则 applySettingsSnapshot 内部那次落盘又会被记录的旧值覆盖。 */
+        const keepRandomSeed = els.randomSeed.checked;
+        applySettingsSnapshot(record.settings || {}, false);
+        els.randomSeed.checked = keepRandomSeed;
+        saveSettings();
         outputUrl = record.outputItem ? getViewUrl(record.outputItem) : record.outputUrl;
         lastSubmittedPrompt = record.promptWorkflow || null;
         els.resultVideo.src = outputUrl;
@@ -7822,7 +7830,7 @@
         els.duration.value = "4";
         els.videoSteps.value = "8";
         els.seed.value = "123456789";
-        els.randomSeed.checked = false;
+        els.randomSeed.checked = true;   // __SEED_PREF__ 默认就是随机
         els.filenamePrefix.value = "MiniMaxH3/bridge";
         els.frameRate.value = "24";
         els.crf.value = "19";
