@@ -5289,6 +5289,13 @@
               </div>
               <div class="compact-field">
                 <div class="field-label">
+                  <label for="sequenceTake">每段取</label>
+                </div>
+                <!-- __SPLIT_TAKE__ 每个「取帧间隔」窗口里取前几帧；默认 1 = 原来的「每 N 帧取 1 帧」 -->
+                <input id="sequenceTake" type="number" min="1" max="9007199254740991" step="1" value="1" disabled title="每个「取帧间隔」窗口里取前几帧。填 1 就是原来的行为（每 N 帧取 1 帧）；想要每 3 帧取 2 帧，就把「取帧间隔」填 3、这里填 2。">
+              </div>
+              <div class="compact-field">
+                <div class="field-label">
                   <label for="sequenceSkip">跳过开头</label>
                 </div>
                 <input id="sequenceSkip" type="number" min="0" max="9007199254740991" step="1" value="0" disabled>
@@ -5987,6 +5994,7 @@
         clearHistoryButton: document.getElementById("clearHistoryButton"),
         sequenceState: document.getElementById("sequenceState"),
         sequenceInterval: document.getElementById("sequenceInterval"),
+        sequenceTake: document.getElementById("sequenceTake"),
         sequenceSkip: document.getElementById("sequenceSkip"),
         splitButton: document.getElementById("splitButton"),
         selectAllButton: document.getElementById("selectAllButton"),
@@ -6467,6 +6475,7 @@
           eagleFolder: els.eagleFolder.value,
           eaglePreview: els.eaglePreview.checked,
           sequenceInterval: els.sequenceInterval.value,
+          sequenceTake: els.sequenceTake.value,   // __SPLIT_TAKE__
           sequenceSkip: els.sequenceSkip.value,
           previewFps: els.previewFps.value,
           sequenceLoop: els.sequenceLoop.checked,
@@ -6502,6 +6511,7 @@
         if (data.eagleFolder) els.eagleFolder.value = data.eagleFolder;
         if (typeof data.eaglePreview === "boolean") els.eaglePreview.checked = data.eaglePreview;
         if (data.sequenceInterval) els.sequenceInterval.value = data.sequenceInterval;
+        if (data.sequenceTake) els.sequenceTake.value = data.sequenceTake;
         if (data.sequenceSkip) els.sequenceSkip.value = data.sequenceSkip;
         if (data.previewFps) els.previewFps.value = data.previewFps;
         if (typeof data.sequenceLoop === "boolean") els.sequenceLoop.checked = data.sequenceLoop;
@@ -6728,6 +6738,7 @@
       function setSequenceInputsEnabled(enabled) {
         [
           els.sequenceInterval,
+          els.sequenceTake,
           els.sequenceSkip,
           els.splitButton,
           els.previewFps,
@@ -6773,7 +6784,7 @@
         const hasKept = kept.length > 0;
         els.sequenceCount.textContent = `${kept.length} / ${sequenceFrames.length} 帧`;
         els.sequenceSummary.textContent = hasFrames
-          ? `当前使用 ${sequenceFrames[0].interval} 帧取 1 帧，跳过开头 ${sequenceFrames[0].skip} 帧。`
+          ? `当前使用 ${sequenceFrames[0].interval} 帧取 ${sequenceFrames[0].take || 1} 帧，跳过开头 ${sequenceFrames[0].skip} 帧。`
           : "生成视频后，在这里拆分序列帧。";
         [
           els.selectAllButton,
@@ -7337,9 +7348,10 @@
         setSequenceState("", "拆分中");
         els.splitButton.disabled = true;
         const interval = Math.max(1, Math.floor(getNumber(els.sequenceInterval, 2)));
-        const skip = Math.max(0, Math.floor(getNumber(els.sequenceSkip, 0)));
+        // __SPLIT_TAKE__ 每个窗口取前几帧；钳在 [1, interval]，超过窗口长度没有意义
+        const take = Math.max(1, Math.min(interval, Math.floor(getNumber(els.sequenceTake, 1))));        const skip = Math.max(0, Math.floor(getNumber(els.sequenceSkip, 0)));
         const fps = Math.max(1, Math.floor(getNumber(els.frameRate, 24)));
-        log(`开始拆分视频：每 ${interval} 帧取 1 帧，跳过 ${skip} 帧。`);
+        log(`开始拆分视频：每 ${interval} 帧取 ${take} 帧，跳过 ${skip} 帧。`);
 
         const previousFrames = sequenceFrames;
         sequenceFrames = [];
@@ -7374,8 +7386,11 @@
             : getNumber(els.duration, 4);
           const totalFrames = Math.max(1, Math.floor(duration * fps));
           const indexes = [];
-          for (let index = skip; index < totalFrames; index += interval) {
-            indexes.push(index);
+          // __SPLIT_TAKE__ 每个窗口取前 take 帧。take=1 时结果与旧行为逐帧一致。
+          for (let base = skip; base < totalFrames; base += interval) {
+            for (let k = 0; k < take && base + k < totalFrames; k += 1) {
+                indexes.push(base + k);
+            }
           }
           if (!indexes.length) {
             throw new Error("当前跳过帧数超过视频长度，没有可拆分的帧");
@@ -7396,6 +7411,7 @@
             sequenceFrames.push({
               sourceIndex,
               interval,
+              take,
               skip,
               keep: true,
               autoExcluded: false,
@@ -7968,6 +7984,7 @@
         els.eagleFolder.value = "序列帧做1";
         els.eaglePreview.checked = true;
         els.sequenceInterval.value = "2";
+        els.sequenceTake.value = "1";   // __SPLIT_TAKE__ 默认与旧行为一致
         els.sequenceSkip.value = "0";
         els.previewFps.value = "12";
         els.sequenceLoop.checked = true;
@@ -8076,6 +8093,7 @@
         els.eagleFolder,
         els.eaglePreview,
         els.sequenceInterval,
+        els.sequenceTake,
         els.sequenceSkip,
         els.previewFps,
         els.sequenceLoop,
