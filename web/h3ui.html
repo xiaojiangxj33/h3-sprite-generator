@@ -5306,6 +5306,18 @@
               <button class="button" id="selectAllButton" type="button" disabled>全选</button>
               <button class="button" id="invertSelectionButton" type="button" disabled>反选</button>
               <button class="button" id="restoreAllButton" type="button" disabled>全部恢复</button>
+              <!-- __DEDUPE_V2__ 按阈值剔除"变化不大"的帧（只标记为相似，可恢复） -->
+              <button class="button" id="dedupeButton" type="button" disabled title="把与上一张保留帧差别小于阈值的帧标记为「相似」并剔除；可随时用「全部恢复」还原">≈ 按阈值剔除</button>
+            </div>
+            <div class="sequence-dedupe">
+              <div class="field-label">
+                <span>相似阈值</span>
+                <span class="field-hint" id="dedupeHint">变化小于它就算相似</span>
+              </div>
+              <div class="range-row">
+                <input id="dedupeThreshold" type="range" min="0.1" max="15" step="0.05" value="3" disabled>
+                <output class="range-value" id="dedupeThresholdValue">3.00%</output>
+              </div>
             </div>
           </div>
           <div class="sequence-summary">
@@ -6000,6 +6012,9 @@
         selectAllButton: document.getElementById("selectAllButton"),
         invertSelectionButton: document.getElementById("invertSelectionButton"),
         restoreAllButton: document.getElementById("restoreAllButton"),
+        dedupeButton: document.getElementById("dedupeButton"),
+        dedupeThreshold: document.getElementById("dedupeThreshold"),
+        dedupeThresholdValue: document.getElementById("dedupeThresholdValue"),
         sequenceSummary: document.getElementById("sequenceSummary"),
         sequenceCount: document.getElementById("sequenceCount"),
         sequenceGrid: document.getElementById("sequenceGrid"),
@@ -6476,6 +6491,7 @@
           eaglePreview: els.eaglePreview.checked,
           sequenceInterval: els.sequenceInterval.value,
           sequenceTake: els.sequenceTake.value,   // __SPLIT_TAKE__
+          dedupeThreshold: els.dedupeThreshold.value,   // __DEDUPE_V2__
           sequenceSkip: els.sequenceSkip.value,
           previewFps: els.previewFps.value,
           sequenceLoop: els.sequenceLoop.checked,
@@ -6512,6 +6528,7 @@
         if (typeof data.eaglePreview === "boolean") els.eaglePreview.checked = data.eaglePreview;
         if (data.sequenceInterval) els.sequenceInterval.value = data.sequenceInterval;
         if (data.sequenceTake) els.sequenceTake.value = data.sequenceTake;
+        if (data.dedupeThreshold) els.dedupeThreshold.value = data.dedupeThreshold;
         if (data.sequenceSkip) els.sequenceSkip.value = data.sequenceSkip;
         if (data.previewFps) els.previewFps.value = data.previewFps;
         if (typeof data.sequenceLoop === "boolean") els.sequenceLoop.checked = data.sequenceLoop;
@@ -6789,7 +6806,9 @@
         [
           els.selectAllButton,
           els.invertSelectionButton,
-          els.restoreAllButton
+          els.restoreAllButton,
+          els.dedupeButton,       // __DEDUPE_ENABLE_FIX__ 与上面三个同组：有帧才可用
+          els.dedupeThreshold,    // __DEDUPE_ENABLE_FIX__ 阈值滑块同理
         ].forEach((button) => {
           button.disabled = !hasFrames;
         });
@@ -7985,6 +8004,7 @@
         els.eaglePreview.checked = true;
         els.sequenceInterval.value = "2";
         els.sequenceTake.value = "1";   // __SPLIT_TAKE__ 默认与旧行为一致
+        els.dedupeThreshold.value = "3";   // __DEDUPE_RANGE__ 按实测中位数定的默认值
         els.sequenceSkip.value = "0";
         els.previewFps.value = "12";
         els.sequenceLoop.checked = true;
@@ -8094,6 +8114,7 @@
         els.eaglePreview,
         els.sequenceInterval,
         els.sequenceTake,
+        els.dedupeThreshold,
         els.sequenceSkip,
         els.previewFps,
         els.sequenceLoop,
@@ -8109,6 +8130,18 @@
       els.splitButton.addEventListener("click", splitCurrentVideo);
       els.selectAllButton.addEventListener("click", () => setAllFramesSelected(true));
       els.invertSelectionButton.addEventListener("click", () => invertFrameSelection());
+      /* __DEDUPE_V2__ 拖动阈值：更新读数；若已经应用过，就实时重算，便于边拖边看。 */
+      els.dedupeThreshold.addEventListener("input", () => {
+        const value = getDedupeThreshold();
+        els.dedupeThresholdValue.textContent = value.toFixed(2) + "%";
+        if (dedupeApplied) { void applyDedupeByThreshold(); }
+      });
+      els.dedupeThreshold.addEventListener("change", saveSettings);
+      els.dedupeButton.addEventListener("click", async () => {
+        dedupeApplied = true;
+        await applyDedupeByThreshold();
+      });
+
       els.restoreAllButton.addEventListener("click", () => {
         sequenceFrames.forEach((frame) => {
           frame.keep = true;
@@ -8543,6 +8576,99 @@
         if (!selected) { sequencePreviewIndex = 0; }
         renderSequenceGrid();
         updateSequenceStatus();
+      }
+
+      /* __DEDUPE_V2__ 相似判定用的指纹：下采样到固定尺寸的 RGBA。
+         含 alpha —— 抠图后的特效帧主要靠 alpha 表达形状，只看颜色会漏掉轮廓变化。 */
+      const DEDUPE_SIGNATURE_SIZE = 96;
+
+      function buildFrameSignature(bitmap) {
+        const canvas = document.createElement("canvas");
+        canvas.width = DEDUPE_SIGNATURE_SIZE;
+        canvas.height = DEDUPE_SIGNATURE_SIZE;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        context.clearRect(0, 0, DEDUPE_SIGNATURE_SIZE, DEDUPE_SIGNATURE_SIZE);
+        context.drawImage(bitmap, 0, 0, DEDUPE_SIGNATURE_SIZE, DEDUPE_SIGNATURE_SIZE);
+        return context.getImageData(0, 0, DEDUPE_SIGNATURE_SIZE, DEDUPE_SIGNATURE_SIZE).data;
+      }
+
+      /* __DEDUPE_METRIC_FIX__ 两个指纹的平均绝对差，返回百分数（0~100）。
+         只统计「两帧里至少一方 alpha>8」的像素 —— 两边都空白的是背景，
+         算进去会把差异稀释掉（实测整图平均只有 1.36%，而画面明明在翻涌，
+         导致阈值一调高就全都"相似"、直接剔光）。 */
+      const DEDUPE_ALPHA_FLOOR = 8;
+
+      function signatureDifference(a, b) {
+        let sum = 0;
+        let active = 0;
+        for (let i = 0; i < a.length; i += 4) {
+          const inA = a[i + 3] > DEDUPE_ALPHA_FLOOR;
+          const inB = b[i + 3] > DEDUPE_ALPHA_FLOOR;
+          if (!inA && !inB) { continue; }
+          active += 1;
+          sum += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1])
+            + Math.abs(a[i + 2] - b[i + 2]) + Math.abs(a[i + 3] - b[i + 3]);
+        }
+        if (!active) { return 0; }
+        return (sum / (active * 4)) / 255 * 100;
+      }
+
+      function getDedupeThreshold() {
+        return Math.max(0, getNumber(els.dedupeThreshold, 3));
+      }
+
+      /* 是否已经点过「按阈值剔除」：点过之后再拖阈值就实时重算，方便边拖边看。 */
+      let dedupeApplied = false;
+
+      /* 按阈值把"与上一张保留帧差别不大"的帧标记为相似。
+         每次都从"全部保留"重算，不累积 —— 拖动阈值反复试不会越剔越多。 */
+      async function applyDedupeByThreshold() {
+        if (sequenceFrames.length < 2) {
+          log("帧数不足，不需要去重。");
+          return;
+        }
+        const threshold = getDedupeThreshold();
+        sequenceFrames.forEach((frame) => {
+          frame.keep = true;
+          frame.autoExcluded = false;
+        });
+        /* __DEDUPE_SIGNATURE_SOURCE__ 指纹按当前抠图设置现算，与导出内容一致；且不写回缓存，
+           否则用户改了抠图参数或重新拆分后缓存会过期。 */
+        const keyedNow = maskActive();
+        const signatures = [];
+        for (let i = 0; i < sequenceFrames.length; i += 1) {
+          const frame = sequenceFrames[i];
+          const source = keyedNow ? await getKeyedCanvas(frame, keying.params) : frame.bitmap;
+          signatures.push(buildFrameSignature(source));
+          if (i % 8 === 0) { setSequenceState("", `分析中 ${i + 1}/${sequenceFrames.length}`); }
+        }
+        setSequenceState("", "分析完成");
+        let lastKept = sequenceFrames[0];
+        let lastKeptIndex = 0;
+        const diffs = [];
+        let dropped = 0;
+        for (let i = 1; i < sequenceFrames.length; i += 1) {
+          const frame = sequenceFrames[i];
+          const diff = signatureDifference(signatures[lastKeptIndex], signatures[i]);
+          diffs.push(diff);
+          if (diff < threshold) {
+            frame.keep = false;
+            frame.autoExcluded = true;
+            dropped += 1;
+          } else {
+            lastKept = frame;
+            lastKeptIndex = i;
+          }
+        }
+        const sorted = diffs.slice().sort((x, y) => x - y);
+        const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+        const max = sorted.length ? sorted[sorted.length - 1] : 0;
+        sequenceAnchorIndex = -1;
+        renderSequenceGrid();
+        updateSequenceStatus();
+        log(`按阈值 ${threshold.toFixed(2)}% 剔除 ${dropped} 帧，保留 ${sequenceFrames.length - dropped} 帧。`
+          + `帧间变化：中位数 ${median.toFixed(2)}%、最大 ${max.toFixed(2)}%`
+          + `（阈值低于中位数时会剔得比较狠，可据此调整）。`);
       }
 
       function invertFrameSelection() {
