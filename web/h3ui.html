@@ -4772,6 +4772,28 @@
       white-space: nowrap;
     }
 
+    /* __PROGRESS_TIMER__ 进度条中间的运行时长 */
+    .progress-track {
+      position: relative;   /* 给中间那行字做定位基准 */
+    }
+
+    .progress-timer {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      padding: 0 7px;
+      border-radius: var(--r-pill);
+      color: var(--ink);
+      background: var(--surface);   /* 垫一层底色，压在任何进度色上都读得清 */
+      font-size: 11px;
+      line-height: 14px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;   /* 数字等宽，跳动时不抖 */
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
 </style>
   <!-- __ONLY_FLUENT_SKIN__ 2026-09-17：只保留流利皮肤，删除 neu/bento/gradient（见 tools/h3ui/patch-h3ui-skins.js） -->
 </head>
@@ -5109,6 +5131,8 @@
             </div>
             <div class="progress-track">
               <div class="progress-fill" id="progressFill"></div>
+              <!-- __PROGRESS_TIMER__ 进度条中间的已运行时长（生成时显示，结束隐藏） -->
+              <span class="progress-timer" id="progressTimer" hidden>00:00</span>
             </div>
           </div>
           <div class="result-actions">
@@ -5989,6 +6013,7 @@
         resultState: document.getElementById("resultState"),
         progressLabel: document.getElementById("progressLabel"),
         progressPercent: document.getElementById("progressPercent"),
+        progressTimer: document.getElementById("progressTimer"),
         progressFill: document.getElementById("progressFill"),
         outputFile: document.getElementById("outputFile"),
         downloadButton: document.getElementById("downloadButton"),
@@ -6040,6 +6065,30 @@
           els.resultState.classList.add(state);
         }
         els.resultState.textContent = text;
+      }
+
+      /* __PROGRESS_TIMER__ 进度条中间的运行时长。起点用生成开始时打的 generationStartedAt，
+         不另开一套计时，免得两处时间对不上。 */
+      let progressTimerId = 0;
+
+      function paintProgressTimer() {
+        if (!els.progressTimer) { return; }
+        const total = generationStartedAt ? Math.floor((Date.now() - generationStartedAt) / 1000) : 0;
+        const mm = String(Math.floor(total / 60)).padStart(2, "0");
+        const ss = String(total % 60).padStart(2, "0");
+        els.progressTimer.textContent = `${mm}:${ss}`;
+      }
+
+      function startProgressTimer() {
+        stopProgressTimer();
+        if (els.progressTimer) { els.progressTimer.hidden = false; }
+        paintProgressTimer();
+        progressTimerId = setInterval(paintProgressTimer, 1000);
+      }
+
+      function stopProgressTimer() {
+        if (progressTimerId) { clearInterval(progressTimerId); progressTimerId = 0; }
+        if (els.progressTimer) { els.progressTimer.hidden = true; }
       }
 
       function setProgress(percent, label) {
@@ -7524,7 +7573,8 @@
           return;
         }
 
-        generationStartedAt = Date.now();   // __HISTORY_FIXES__ 记开始时间，用于算总耗时
+        generationStartedAt = Date.now();
+        startProgressTimer();   // __HISTORY_FIXES__ 记开始时间，用于算总耗时
         isRunning = true;
         els.runButton.disabled = true;
         els.downloadButton.disabled = true;
@@ -7606,6 +7656,7 @@
         } finally {
           isRunning = false;
           els.runButton.disabled = false;
+          stopProgressTimer();   // __PROGRESS_TIMER__ 结束就停表并隐藏
         }
       }
 
