@@ -4905,7 +4905,11 @@
           <div class="field">
             <div class="field-label">
               <label for="promptText">动画提示词</label>
-              <span class="field-hint">支持换行</span>
+              <span class="field-actions">
+                <span class="field-hint">支持换行</span>
+                <!-- __PASTE_PROMPT__ 点一下用剪切板文本替换（并清空）框里的内容 -->
+                <button class="mini-button" id="pastePromptButton" type="button" title="从系统剪切板读取文本，替换当前提示词（原有内容会被清空）">⧉ 粘贴</button>
+              </span>
             </div>
             <textarea id="promptText" spellcheck="false"></textarea>
           </div>
@@ -5500,7 +5504,7 @@
           "_meta": { "title": "Video Combine" }
         }
       };
-
+
       /* __WORKFLOW_SWITCH__ 官方（原生 MiniMax H3 节点图）· API 格式，由用户导出的工作流直接嵌入。
          注意：这份图里**没有** ResolutionSelector / 音频条件节点，尺寸固定在两个地方
          （节点 2 ImageScale 与节点 12 MiniMaxH3ImageToVideo 的 width/height，都是 512）。
@@ -5898,6 +5902,7 @@
         imageName: document.getElementById("imageName"),
         clearImageButton: document.getElementById("clearImageButton"),
         pasteImageButton: document.getElementById("pasteImageButton"),
+        pastePromptButton: document.getElementById("pastePromptButton"),
         uploadImageButton: document.getElementById("uploadImageButton"),
         workflowSelect: document.getElementById("workflowSelect"),
         workflowHint: document.getElementById("workflowHint"),
@@ -7849,6 +7854,28 @@
       els.dropzone.addEventListener("click", () => els.imageInput.click());
       // 上传：直接复用同一个隐藏 input（与点击虚线框同一条路径）
       els.uploadImageButton.addEventListener("click", () => els.imageInput.click());
+
+      /* __PASTE_PROMPT__ 粘贴文本：直接覆盖 els.promptText.value —— 用户要求"点粘贴的同时删掉旧提示词"。 */
+      els.pastePromptButton.addEventListener("click", async () => {
+        if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") {
+          log("当前浏览器不支持读取剪切板文本（Firefox 不支持），请手动 Ctrl+V 粘贴。");
+          return;
+        }
+        try {
+          const raw = await navigator.clipboard.readText();
+          const text = (raw || "").trim();
+          if (!text) {
+            log("剪切板里没有文本。");
+            return;
+          }
+          els.promptText.value = text;      // 覆盖 = 旧提示词被删除
+          saveSettings();
+          els.promptText.focus();
+          log(`已用剪切板文本替换动画提示词（${text.length} 字）。`);
+        } catch (error) {
+          log(`读取剪切板失败：${error.message}（需要允许本页访问剪切板）。`);
+        }
+      });
 
       // 剪切板：读系统剪切板里的图片，包成 File 后交给既有的 setFile()（校验/预览/状态复用同一套）
       els.pasteImageButton.addEventListener("click", async () => {
